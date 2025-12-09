@@ -1,0 +1,175 @@
+import OpenAI from 'openai';
+import { loadAllReports, filterData } from './dataLoader.js';
+
+// 延迟初始化
+let client = null;
+
+function getClaudeClient() {
+    if (!client) {
+        const apiKey = process.env.TONGYI_API_KEY || process.env.CLAUDE_API_KEY;
+
+        if (!apiKey) {
+            throw new Error('请在 .env 中设置 TONGYI_API_KEY 或 CLAUDE_API_KEY');
+        }
+
+        console.log('[通义千问] API Key loaded:', apiKey.substring(0, 12) + '...');
+
+        client = new OpenAI({
+            apiKey,
+            baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        });
+    }
+    return client;
+}
+
+function getCurrentDate() {
+    return new Date().toLocaleDateString('zh-CN', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
+}
+
+const REPORT_PROMPT = `你是一个专业的金融科技产品运营分析师，负责分析用户反馈(VOC)数据并生成报告。
+
+## 输出要求
+1. 使用中文撰写
+2. 使用 Markdown 格式
+3. **禁止使用表格**，改用列表形式展示数据
+4. 结构清晰，层次分明
+5. 数据准确，不要编造数字
+6. **不要在报告中写生成时间**，系统会自动添加
+
+## 报告结构
+1. **概览** - 数据时间范围、总量、市场分布（用列表展示）
+2. **问题分类统计** - 各类别数量和占比（用列表展示）
+3. **高频问题** - TOP 5 高频问题及具体表现
+4. **紧急问题** - 需要立即处理的高风险项（标注优先级）
+5. **改进建议** - 分为：
+   - 立即行动（24-48小时内）
+   - 短期优化（1-2周）
+   - 中期规划（1个月内）
+6. **总结** - 2-3句话总结核心发现和行动重点
+
+## 风格要求
+- 直接、简洁、可执行
+- 使用 bullet points 而非长段落
+- 高风险项用 **加粗** 标注
+- 给出具体、可操作的建议，而非泛泛而谈`;
+
+function prepareReportSummary(data) {
+    const categoryStats = {};
+    const riskStats = { High: 0, Medium: 0, Low: 0 };
+    const countryStats = {};
+    const summaries = [];
+
+    let minDate = null;
+    let maxDate = null;
+
+    data.forEach(item => {
+        const cat = item.category || '其他';
+        categoryStats[cat] = (categoryStats[cat] || 0) + 1;
+
+        const risk = item.risk_level || item.riskLevel || 'Medium';
+        if (riskStats[risk] !== undefined) riskStats[risk]++;
+
+        const country = item.country || '未知';
+        countryStats[country] = (countryStats[country] || 0) + 1;
+
+        if (item.date) {
+            const d = new Date(item.date);
+            if (!minDate || d < minDate) minDate = d;
+            if (!maxDate || d > maxDate) maxDate = d;
+        }
+
+        if (item.summary) {
+            summaries.push({
+                category: cat,
+                risk: risk,
+                summary: item.summary,
+                country: country
+            });
+        }
+    });
+
+    const formatDate = (d) => d ? d.toLocaleDateString('zh-CN') : '未知';
+
+    return {
+        totalCount: data.length,
+        dateRange: {
+            start: formatDate(minDate),
+            end: formatDate(maxDate)
+        },
+        categoryStats,
+        riskStats,
+        countryStats,
+        topIssues: summaries
+            .sort((a, b) => {
+                const order = { High: 0, Medium: 1, Low: 2 };
+                return (order[a.risk] || 3) - (order[b.risk] || 3);
+            })
+            .slice(0, 50)
+    };
+}
+
+export async function generateReportWithQW(filters = {}, limit = 100) {
+    let data = loadAllReports();
+    filters.reportMode = true;
+    data = filterData(data, filters);
+
+    const reportData = data.slice(0, limit);
+
+    if (reportData.length === 0) {
+        return {
+            success: false,
+            report: '没有找到符合条件的数据',
+            meta: { totalAnalyzed: 0, model: 'qwen3-max' }
+        };
+    }
+
+    const summary = prepareReportSummary(reportData);
+    const client = getClaudeClient();
+
+    console.log('[通义千问] 正在生成报告...');
+
+    const completion = await client.chat.completions.create({
+        model: "qwen3-max",           // 可换 qwen-plus / qwen-turbo
+        max_tokens: 4000,
+        temperature: 0.3,
+        messages: [
+            { role: "system", content: REPORT_PROMPT },
+            {
+                role: "user",
+                content: `请根据以下VOC数据生成完整的分析报告：
+
+## 数据摘要
+- 数据总量：${summary.totalCount} 条
+- 时间范围：${summary.dateRange.start} 至 ${summary.dateRange.end}
+- 国家分布：${JSON.stringify(summary.countryStats)}
+- 问题分类统计：${JSON.stringify(summary.categoryStats)}
+- 风险分布：${JSON.stringify(summary.riskStats)}
+
+## 具体问题（按风险降序，最多50条）
+${JSON.stringify(summary.topIssues, null, 2)}
+
+请严格按照要求输出 Markdown 报告：`
+            }
+        ]
+    });
+
+    let report = completion.choices[0].message.content.trim();
+
+    const currentDate = getCurrentDate();
+    report += `\n\n---\n*报告生成时间：${currentDate} | 模型：通义千问 qwen-max*`;
+
+    return {
+        success: true,
+        report,
+        meta: {
+            totalAnalyzed: reportData.length,
+            generatedAt: new Date().toISOString(),
+            model: 'qwen-max',
+            usage: completion.usage
+        }
+    };
+}
