@@ -47,6 +47,7 @@ export interface VOCItem {
   text: string;
   translated_text: string;
   risk_level: RiskLevel;
+  riskLevel?: RiskLevel; // 兼容
   score: number;
   // Status fields
   status: ReviewStatus;
@@ -82,4 +83,62 @@ export interface FilterParams {
   endDate?: string;
   status?: string;
   reportMode?: boolean;
+  appId?: string;
+}
+
+// ========== 新增：报告相关类型 ==========
+
+export interface AppInfo {
+  appId: string;
+  appName: string;
+  country: string;
+  totalReviews: number;
+}
+
+export interface Report {
+  id: number;
+  app_id: string;
+  app_name: string;
+  report_type: string;
+  week_number: number;
+  year: number;
+  title: string;
+  content: string;
+  summary_stats: string;
+  compared_with_last: string;
+  total_issues: number;
+  new_issues: number;
+  resolved_issues: number;
+  pending_issues: number;
+  created_at: string;
+}
+
+export interface ReportMeta {
+  appId: string;
+  appName: string;
+  weekNumber: number;
+  year: number;
+  totalAnalyzed: number;
+  newThisWeek: number;
+  resolved: number;
+  generatedAt: string;
+}
+
+export interface GenerateReportResponse {
+  success: boolean;
+  report: string;
+  meta: ReportMeta;
+  error?: string;
+}
+
+// ========== 新增：邮件订阅类型 ==========
+
+export interface EmailSubscription {
+  id: number;
+  app_id: string;
+  app_name: string;
+  email: string;
+  recipient_name: string;
+  is_active: number;
+  created_at: string;
 }

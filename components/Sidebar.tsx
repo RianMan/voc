@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Table2, Settings, ShieldAlert, FileText } from 'lucide-react';
+import { LayoutDashboard, Table2, Settings, ShieldAlert, FileText, Archive } from 'lucide-react';
 
 interface SidebarProps {
   currentView: string;
@@ -8,10 +8,10 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView }) => {
   const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'reports', label: 'Data Reports', icon: Table2 },
-    { id: 'compliance', label: 'Compliance Queue', icon: ShieldAlert },
-    { id: 'settings', label: 'Agent Settings', icon: Settings },
+    { id: 'dashboard', label: '总体数据', icon: LayoutDashboard },
+    { id: 'reports', label: '问题处理', icon: Table2 },
+    { id: 'archive', label: '报告存档', icon: Archive },
+    { id: 'settings', label: '设置', icon: Settings },
   ];
 
   return (
@@ -51,7 +51,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView })
 
       <div className="p-4 border-t border-slate-800">
         <div className="bg-slate-800 rounded-lg p-3">
-          <p className="text-xs text-slate-400 mb-1">DeepSeek API Status</p>
+          <p className="text-xs text-slate-400 mb-1">AI Status</p>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
             <span className="text-xs font-mono text-green-400">ONLINE</span>

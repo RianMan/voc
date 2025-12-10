@@ -24,7 +24,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
 
   // Calculate Stats
   const total = safeData.length;
-  const highRisk = safeData.filter(i => i.riskLevel === 'High').length;
+  const highRisk = safeData.filter(i => i.risk_level === 'High').length;
   const bugs = safeData.filter(i => i.category === 'Tech_Bug').length;
   const compliance = safeData.filter(i => i.category === 'Compliance_Risk').length;
   const product = safeData.filter(i => i.category === 'Product_Issue').length;
@@ -75,47 +75,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-800">Overview</h2>
-        <span className="text-sm text-slate-500">Real-time Analysis Stats</span>
+        <h2 className="text-2xl font-bold text-slate-800">概览</h2>
+        <span className="text-sm text-slate-500">实时分析统计</span>
       </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard 
-          title="Total Feedback" 
-          value={total} 
-          sub="Analyzed records" 
-          icon={MessageCircle} 
-          color="bg-blue-500" 
-        />
-        <StatCard 
-          title="High Risk / Alerts" 
-          value={highRisk} 
-          sub="Requires immediate attention" 
-          icon={AlertTriangle} 
-          color="bg-red-500" 
-        />
-        <StatCard 
-          title="Compliance Issues" 
-          value={compliance} 
-          sub="Threats, harassment keywords" 
-          icon={TrendingUp} 
-          color="bg-purple-500" 
-        />
-        <StatCard 
-          title="Technical Bugs" 
-          value={bugs} 
-          sub="Crashes, OTP failures" 
-          icon={Bug} 
-          color="bg-amber-500" 
-        />
+        <StatCard title="总反馈" value={total} sub="已分析记录" icon={MessageCircle} color="bg-blue-500" />
+        <StatCard title="高风险" value={highRisk} sub="需立即关注" icon={AlertTriangle} color="bg-red-500" />
+        <StatCard title="合规问题" value={compliance} sub="威胁/骚扰关键词" icon={TrendingUp} color="bg-purple-500" />
+        <StatCard title="技术Bug" value={bugs} sub="崩溃/OTP失败" icon={Bug} color="bg-amber-500" />
       </div>
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Risk Distribution */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-          <h3 className="text-lg font-semibold text-slate-800 mb-6">Issue Category Distribution</h3>
+          <h3 className="text-lg font-semibold text-slate-800 mb-6">问题分类分布</h3>
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -148,7 +124,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
 
         {/* Volume by Source */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-          <h3 className="text-lg font-semibold text-slate-800 mb-6">Feedback Volume by Country</h3>
+          <h3 className="text-lg font-semibold text-slate-800 mb-6">各国反馈量</h3>
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={sourceData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>

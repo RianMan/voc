@@ -1,41 +1,152 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { VOCItem, ReviewStatus, STATUS_LABELS } from '../types';
-import { fetchVocData, batchUpdateStatus, updateReviewStatus, generateReport } from '../services/api';
+import { VOCItem, ReviewStatus, STATUS_LABELS, AppInfo, Report } from '../types';
+import { 
+  fetchVocData, 
+  batchUpdateStatus, 
+  updateReviewStatus, 
+  generateAppReport,
+  fetchApps,
+  fetchReports
+} from '../services/api';
 import { RiskBadge } from '../components/RiskBadge';
-import { StatusBadge } from '../components/StatusBadge';
-import { Search, ChevronLeft, ChevronRight, Calendar, Loader2, FileText, CheckSquare, X, Copy, Download } from 'lucide-react';
+import { 
+  Search, ChevronLeft, ChevronRight, Calendar, Loader2, FileText, 
+  CheckSquare, X, Copy, Download, Archive, ChevronDown,
+  Check, Ban, Send, Clock, CheckCircle, Loader, CheckCircle2
+} from 'lucide-react';
 
 // 简易 Markdown 解析器
 function parseMarkdown(md: string): string {
   let html = md
-    // 转义HTML特殊字符
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    // 标题
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-    // 粗体和斜体
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    // 代码块
     .replace(/`([^`]+)`/g, '<code class="bg-slate-100 px-1 py-0.5 rounded text-sm">$1</code>')
-    // 无序列表
     .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
-    // 有序列表
     .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-    // 分隔线
     .replace(/^---$/gm, '<hr class="my-4 border-slate-200">')
-    // 段落 (连续的非空行)
     .replace(/^(?!<[hlo]|<li|<hr)(.+)$/gm, '<p>$1</p>')
-    // 包装连续的 li
     .replace(/(<li>.*<\/li>\n?)+/g, '<ul class="list-disc list-inside space-y-1 my-2">$&</ul>')
-    // 清理多余空行
     .replace(/\n{3,}/g, '\n\n');
   
   return html;
 }
+
+// 可展开文本组件
+const ExpandableText: React.FC<{
+  translated: string;
+  original: string;
+  maxLength?: number;
+}> = ({ translated, original, maxLength = 80 }) => {
+  const [expanded, setExpanded] = useState(false);
+  
+  const needsTruncate = translated.length > maxLength || original.length > maxLength;
+  const displayTranslated = expanded ? translated : translated.slice(0, maxLength);
+  const displayOriginal = expanded ? original : original.slice(0, maxLength);
+  
+  return (
+    <div className="text-xs space-y-1">
+      <p className="text-slate-600 bg-slate-50 p-2 rounded border border-slate-100">
+        <span className="text-slate-400 text-[10px]">翻译：</span>
+        {displayTranslated}
+        {!expanded && translated.length > maxLength && '...'}
+      </p>
+      <p className="text-slate-400 italic">
+        <span className="text-slate-300 text-[10px]">原文：</span>
+        {displayOriginal}
+        {!expanded && original.length > maxLength && '...'}
+      </p>
+      {needsTruncate && (
+        <button 
+          onClick={() => setExpanded(!expanded)}
+          className="text-blue-500 hover:text-blue-600 text-[10px]"
+        >
+          {expanded ? '收起' : '展开全部'}
+        </button>
+      )}
+    </div>
+  );
+};
+
+// 状态配置
+const STATUS_CONFIG: Record<ReviewStatus, { 
+  bg: string; text: string; border: string; icon: React.ReactNode; label: string;
+}> = {
+  pending: { bg: 'bg-slate-50', text: 'text-slate-600', border: 'border-slate-200', icon: <Clock size={14} />, label: '待处理' },
+  irrelevant: { bg: 'bg-gray-50', text: 'text-gray-500', border: 'border-gray-200', icon: <Ban size={14} />, label: '无意义' },
+  confirmed: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', icon: <CheckCircle size={14} />, label: '已确认' },
+  reported: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', icon: <Send size={14} />, label: '已反馈' },
+  in_progress: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: <Loader size={14} />, label: '处理中' },
+  resolved: { bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200', icon: <CheckCircle2 size={14} />, label: '已解决' },
+};
+
+// 操作按钮组件
+const ActionButtons: React.FC<{
+  currentStatus: ReviewStatus;
+  onStatusChange: (status: ReviewStatus) => void;
+  loading?: boolean;
+}> = ({ currentStatus, onStatusChange, loading }) => {
+  // 根据当前状态显示不同的快捷操作
+  const getQuickActions = (): { status: ReviewStatus; label: string; color: string }[] => {
+    switch (currentStatus) {
+      case 'pending':
+        return [
+          { status: 'confirmed', label: '确认', color: 'bg-blue-500 hover:bg-blue-600' },
+          { status: 'irrelevant', label: '无效', color: 'bg-gray-400 hover:bg-gray-500' },
+        ];
+      case 'confirmed':
+        return [
+          { status: 'reported', label: '已反馈', color: 'bg-purple-500 hover:bg-purple-600' },
+          { status: 'in_progress', label: '处理中', color: 'bg-amber-500 hover:bg-amber-600' },
+        ];
+      case 'reported':
+      case 'in_progress':
+        return [
+          { status: 'resolved', label: '已解决', color: 'bg-green-500 hover:bg-green-600' },
+        ];
+      case 'resolved':
+        return [
+          { status: 'pending', label: '重开', color: 'bg-slate-500 hover:bg-slate-600' },
+        ];
+      case 'irrelevant':
+        return [
+          { status: 'pending', label: '恢复', color: 'bg-slate-500 hover:bg-slate-600' },
+        ];
+      default:
+        return [];
+    }
+  };
+
+  const config = STATUS_CONFIG[currentStatus] || STATUS_CONFIG.pending;
+  const actions = getQuickActions();
+
+  return (
+    <div className="flex items-center gap-2">
+      {/* 当前状态标签 */}
+      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border ${config.bg} ${config.text} ${config.border}`}>
+        {config.icon}
+        {config.label}
+      </span>
+      
+      {/* 快捷操作按钮 */}
+      {actions.map(action => (
+        <button
+          key={action.status}
+          onClick={() => onStatusChange(action.status)}
+          disabled={loading}
+          className={`px-2 py-1 text-xs text-white rounded transition-colors disabled:opacity-50 ${action.color}`}
+        >
+          {action.label}
+        </button>
+      ))}
+    </div>
+  );
+};
 
 export const Reports: React.FC = () => {
   // State
@@ -44,12 +155,15 @@ export const Reports: React.FC = () => {
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
+  // Apps State
+  const [apps, setApps] = useState<AppInfo[]>([]);
+  const [selectedApp, setSelectedApp] = useState<string>('All');
+
   // Filters State
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
   const [riskFilter, setRiskFilter] = useState<string>('All');
-  const [countryFilter, setCountryFilter] = useState<string>('All');
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [dateRange, setDateRange] = useState<{start: string, end: string}>({ start: '', end: '' });
@@ -57,11 +171,18 @@ export const Reports: React.FC = () => {
   // Selection State
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   // Report State
   const [generatingReport, setGeneratingReport] = useState(false);
   const [reportContent, setReportContent] = useState<string | null>(null);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [reportMeta, setReportMeta] = useState<any>(null);
+
+  // Archive State
+  const [showArchive, setShowArchive] = useState(false);
+  const [archivedReports, setArchivedReports] = useState<Report[]>([]);
+  const [loadingArchive, setLoadingArchive] = useState(false);
 
   // Debounce search
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -70,44 +191,64 @@ export const Reports: React.FC = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
+  // Load Apps
+  useEffect(() => {
+    fetchApps().then(res => {
+      if (res.success) {
+        const validApps = res.data.filter(app => app.appId !== 'Unknown');
+        setApps(validApps);
+      }
+    }).catch(console.error);
+  }, []);
+
   // Fetch Data
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-        const result = await fetchVocData({
+      const filters: any = {
         page: currentPage,
         limit: pageSize,
-        reportMode: true, 
+        reportMode: true,
         category: categoryFilter,
         risk: riskFilter,
-        country: countryFilter,
         search: debouncedSearch,
         startDate: dateRange.start,
         endDate: dateRange.end,
-        status: statusFilter
-        } as any);
-        
-        setData(result.data || []);
-        setTotalItems(result.meta.total);
-        setTotalPages(result.meta.totalPages);
-        setSelectedIds(new Set()); // Clear selection on data change
-    } catch (e) {
-        console.error("Fetch error", e);
-        setData([]);
-    } finally {
-        setLoading(false);
-    }
-  }, [currentPage, pageSize, categoryFilter, riskFilter, countryFilter, debouncedSearch, dateRange, statusFilter]);
+        status: statusFilter,
+      };
+      
+      // App筛选通过country实现（如果选择了特定App）
+      if (selectedApp !== 'All') {
+        filters.appId = selectedApp;
+      }
 
-  // Trigger fetch when filters change
+      const result = await fetchVocData(filters);
+      
+      // 如果选择了特定App，前端再过滤一次
+      let filteredData = result.data || [];
+      if (selectedApp !== 'All') {
+        filteredData = filteredData.filter(item => item.appId === selectedApp);
+      }
+      
+      setData(filteredData);
+      setTotalItems(result.meta.total);
+      setTotalPages(result.meta.totalPages);
+      setSelectedIds(new Set());
+    } catch (e) {
+      console.error("Fetch error", e);
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPage, pageSize, categoryFilter, riskFilter, debouncedSearch, dateRange, statusFilter, selectedApp]);
+
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  // Reset page when filters change (except page itself)
   useEffect(() => {
     setCurrentPage(1);
-  }, [pageSize, categoryFilter, riskFilter, countryFilter, debouncedSearch, dateRange, statusFilter]);
+  }, [pageSize, categoryFilter, riskFilter, debouncedSearch, dateRange, statusFilter, selectedApp]);
 
   // Selection handlers
   const toggleSelectAll = () => {
@@ -145,30 +286,37 @@ export const Reports: React.FC = () => {
 
   // Single status update
   const handleStatusChange = async (id: string, newStatus: ReviewStatus) => {
+    setUpdatingId(id);
     try {
       await updateReviewStatus(id, newStatus);
-      // Update local state
       setData(prev => prev.map(item => 
         item.id === id ? { ...item, status: newStatus } : item
       ));
     } catch (e) {
       console.error('Status update failed', e);
+    } finally {
+      setUpdatingId(null);
     }
   };
 
-  // Generate AI Report
+  // Generate AI Report (新版 - 按App生成)
   const handleGenerateReport = async () => {
+    if (selectedApp === 'All') {
+      alert('请先选择一个App再生成报告');
+      return;
+    }
+
     setGeneratingReport(true);
     try {
-      const result = await generateReport({
+      const result = await generateAppReport(selectedApp, {
         category: categoryFilter !== 'All' ? categoryFilter : undefined,
         risk: riskFilter !== 'All' ? riskFilter : undefined,
-        country: countryFilter !== 'All' ? countryFilter : undefined,
         startDate: dateRange.start || undefined,
         endDate: dateRange.end || undefined
-      }, 100);
+      });
       
       setReportContent(result.report);
+      setReportMeta(result.meta);
       setShowReportModal(true);
     } catch (e) {
       console.error('Report generation failed', e);
@@ -178,13 +326,39 @@ export const Reports: React.FC = () => {
     }
   };
 
+  // Load archived reports
+  const handleShowArchive = async () => {
+    setShowArchive(true);
+    setLoadingArchive(true);
+    try {
+      const res = await fetchReports(selectedApp !== 'All' ? selectedApp : undefined, 30);
+      setArchivedReports(res.data || []);
+    } catch (e) {
+      console.error('Load archive failed', e);
+    } finally {
+      setLoadingArchive(false);
+    }
+  };
+
+  // View archived report
+  const handleViewArchivedReport = (report: Report) => {
+    setReportContent(report.content);
+    setReportMeta({
+      appId: report.app_id,
+      appName: report.app_name,
+      weekNumber: report.week_number,
+      year: report.year
+    });
+    setShowArchive(false);
+    setShowReportModal(true);
+  };
+
   // Format Date Helper
   const formatDate = (dateString: string) => {
     try {
       if (!dateString) return '-';
       const date = new Date(dateString);
       return date.toLocaleString('zh-CN', {
-        year: 'numeric',
         month: '2-digit',
         day: '2-digit',
         hour: '2-digit',
@@ -196,75 +370,105 @@ export const Reports: React.FC = () => {
     }
   };
 
+  const selectedAppInfo = apps.find(a => a.appId === selectedApp);
+
   return (
     <div className="space-y-6 pb-10">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">Raw Data Reports</h2>
-          <p className="text-sm text-slate-500">Filtered Issues Only (Medium/High Risk). Total: {totalItems}</p>
+          <h2 className="text-2xl font-bold text-slate-800">问题处理</h2>
+          <p className="text-sm text-slate-500">
+            {selectedApp !== 'All' 
+              ? `${selectedAppInfo?.appName || selectedApp} - 共 ${totalItems} 条待处理`
+              : `全部App - 共 ${totalItems} 条`
+            }
+          </p>
         </div>
         
-        <button 
-          onClick={handleGenerateReport}
-          disabled={generatingReport}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-sm disabled:opacity-50"
-        >
-          {generatingReport ? (
-            <Loader2 size={18} className="animate-spin" />
-          ) : (
-            <FileText size={18} />
-          )}
-          {generatingReport ? 'Generating...' : 'Generate AI Report'}
-        </button>
+        <div className="flex gap-2">
+          <button 
+            onClick={handleShowArchive}
+            className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium transition-colors"
+          >
+            <Archive size={18} />
+            报告存档
+          </button>
+          <button 
+            onClick={handleGenerateReport}
+            disabled={generatingReport || selectedApp === 'All'}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            title={selectedApp === 'All' ? '请先选择一个App' : ''}
+          >
+            {generatingReport ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : (
+              <FileText size={18} />
+            )}
+            {generatingReport ? '生成中...' : '生成周报'}
+          </button>
+        </div>
       </div>
 
-      {/* Filters Toolbar - Removed 'sticky top-0' */}
+      {/* Filters Toolbar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-4">
         <div className="flex flex-col md:flex-row gap-4">
-            {/* Search */}
-            <div className="relative flex-1">
+          {/* App Selector - 新增 */}
+          <select 
+            value={selectedApp}
+            onChange={(e) => setSelectedApp(e.target.value)}
+            className="px-3 py-2 border border-blue-200 rounded-lg bg-blue-50 text-sm font-medium text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="All">全部App</option>
+            {apps.map(app => (
+              <option key={app.appId} value={app.appId}>
+                {app.appName} ({app.country})
+              </option>
+            ))}
+          </select>
+
+          {/* Search */}
+          <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input 
-                type="text" 
-                placeholder="Search keywords (server-side)..." 
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              type="text" 
+              placeholder="搜索关键词..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+          </div>
+          
+          {/* Date Range */}
+          <div className="flex gap-2 items-center">
+            <div className="relative">
+              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input 
+                type="date" 
+                value={dateRange.start}
+                onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                className="pl-10 pr-2 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              />
             </div>
-            
-            {/* Date Range */}
-            <div className="flex gap-2 items-center">
-                <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                    <input 
-                        type="date" 
-                        value={dateRange.start}
-                        onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-                        className="pl-10 pr-2 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                </div>
-                <span className="text-slate-400">-</span>
-                <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                    <input 
-                        type="date" 
-                        value={dateRange.end}
-                        onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-                        className="pl-10 pr-2 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                </div>
+            <span className="text-slate-400">-</span>
+            <div className="relative">
+              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input 
+                type="date" 
+                value={dateRange.end}
+                onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                className="pl-10 pr-2 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              />
             </div>
+          </div>
         </div>
         
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-          {/* Category Filter */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           <select 
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
             className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="All">Category: All</option>
+            <option value="All">分类: 全部</option>
             <option value="Tech_Bug">Tech Bug</option>
             <option value="Compliance_Risk">Compliance Risk</option>
             <option value="Product_Issue">Product Issue</option>
@@ -272,43 +476,39 @@ export const Reports: React.FC = () => {
             <option value="Other">Other</option>
           </select>
 
-          {/* Risk Filter */}
           <select 
             value={riskFilter}
             onChange={(e) => setRiskFilter(e.target.value)}
             className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="All">Risk: All Issues</option>
-            <option value="High">Risk: High</option>
-            <option value="Medium">Risk: Medium</option>
+            <option value="All">风险: 全部</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
           </select>
 
-          <select 
-            value={countryFilter}
-            onChange={(e) => setCountryFilter(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="All">Country: All</option>
-            <option value="PK">Pakistan</option>
-            <option value="MX">Mexico</option>
-            <option value="PH">Philippines</option>
-            <option value="ID">Indonesia</option>
-            <option value="TH">Thailand</option>
-          </select>
-
-          {/* Status Filter */}
           <select 
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="All">Status: All</option>
+            <option value="All">状态: 全部</option>
             <option value="pending">待处理</option>
             <option value="confirmed">已确认</option>
             <option value="reported">已反馈</option>
             <option value="in_progress">处理中</option>
             <option value="resolved">已解决</option>
             <option value="irrelevant">无意义</option>
+          </select>
+
+          <select 
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value={10}>10条/页</option>
+            <option value={20}>20条/页</option>
+            <option value={50}>50条/页</option>
+            <option value={100}>100条/页</option>
           </select>
         </div>
 
@@ -320,17 +520,11 @@ export const Reports: React.FC = () => {
               已选 {selectedIds.size} 项
             </span>
             <span className="text-slate-300">|</span>
-            <span className="text-sm text-slate-500">批量设为:</span>
-            {Object.entries(STATUS_LABELS).map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => handleBatchStatusUpdate(key as ReviewStatus)}
-                disabled={updatingStatus}
-                className="px-2 py-1 text-xs rounded border border-slate-200 hover:bg-slate-100 disabled:opacity-50"
-              >
-                {label}
-              </button>
-            ))}
+            <span className="text-sm text-slate-500">批量操作:</span>
+            <button onClick={() => handleBatchStatusUpdate('confirmed')} disabled={updatingStatus} className="px-2 py-1 text-xs rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50">确认</button>
+            <button onClick={() => handleBatchStatusUpdate('reported')} disabled={updatingStatus} className="px-2 py-1 text-xs rounded bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50">已反馈</button>
+            <button onClick={() => handleBatchStatusUpdate('resolved')} disabled={updatingStatus} className="px-2 py-1 text-xs rounded bg-green-500 text-white hover:bg-green-600 disabled:opacity-50">已解决</button>
+            <button onClick={() => handleBatchStatusUpdate('irrelevant')} disabled={updatingStatus} className="px-2 py-1 text-xs rounded bg-gray-400 text-white hover:bg-gray-500 disabled:opacity-50">无效</button>
           </div>
         )}
       </div>
@@ -339,14 +533,14 @@ export const Reports: React.FC = () => {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto relative min-h-[400px]">
           {loading && (
-             <div className="absolute inset-0 bg-white/80 z-20 flex items-center justify-center">
-                 <Loader2 className="animate-spin text-blue-600" size={32} />
-             </div>
+            <div className="absolute inset-0 bg-white/80 z-20 flex items-center justify-center">
+              <Loader2 className="animate-spin text-blue-600" size={32} />
+            </div>
           )}
           <table className="w-full text-sm text-left relative">
             <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
               <tr>
-                <th className="px-4 py-4 whitespace-nowrap bg-slate-50 w-10">
+                <th className="px-4 py-4 w-10">
                   <input 
                     type="checkbox"
                     checked={selectedIds.size === data.length && data.length > 0}
@@ -354,20 +548,19 @@ export const Reports: React.FC = () => {
                     className="rounded border-slate-300"
                   />
                 </th>
-                <th className="px-4 py-4 whitespace-nowrap bg-slate-50">Date</th>
-                <th className="px-4 py-4 whitespace-nowrap bg-slate-50">App Info</th>
-                <th className="px-4 py-4 whitespace-nowrap bg-slate-50">Risk</th>
-                <th className="px-4 py-4 whitespace-nowrap bg-slate-50">Category</th>
-                <th className="px-4 py-4 whitespace-nowrap min-w-[140px] bg-slate-50">Status</th>
-                <th className="px-4 py-4 whitespace-nowrap min-w-[280px] bg-slate-50">Content Analysis</th>
-                <th className="px-4 py-4 whitespace-nowrap min-w-[200px] bg-slate-50">Original Text</th>
+                <th className="px-4 py-4 whitespace-nowrap">时间</th>
+                <th className="px-4 py-4 whitespace-nowrap">App</th>
+                <th className="px-4 py-4 whitespace-nowrap">风险</th>
+                <th className="px-4 py-4 whitespace-nowrap">分类</th>
+                <th className="px-4 py-4 whitespace-nowrap min-w-[200px]">操作</th>
+                <th className="px-4 py-4 whitespace-nowrap min-w-[280px]">问题摘要</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {data.length === 0 && !loading ? (
                 <tr>
                   <td colSpan={8} className="px-6 py-12 text-center text-slate-400">
-                    No records found matching your filters.
+                    暂无数据
                   </td>
                 </tr>
               ) : (
@@ -386,16 +579,10 @@ export const Reports: React.FC = () => {
                     </td>
                     <td className="px-4 py-4 align-top">
                       <div className="flex flex-col">
-                        <span className="font-bold text-slate-800 flex items-center gap-2">
-                           {item.country} 
-                           {item.appName && <span className="font-normal text-slate-500 text-xs">| {item.appName}</span>}
+                        <span className="font-medium text-slate-800 text-xs">
+                          {item.appName || item.appId}
                         </span>
-                        <span className="text-xs text-slate-400 font-mono mt-1">{item.appId}</span>
-                        {item.version && (
-                           <span className="inline-block mt-1 px-1.5 py-0.5 bg-slate-100 text-slate-500 text-[10px] rounded w-fit">
-                             v{item.version}
-                           </span>
-                        )}
+                        <span className="text-xs text-slate-400">{item.country}</span>
                       </div>
                     </td>
                     <td className="px-4 py-4 align-top">
@@ -411,19 +598,29 @@ export const Reports: React.FC = () => {
                         {item.category.replace('_', ' ')}
                       </span>
                     </td>
-                    <td className="px-4 py-4 align-top whitespace-nowrap min-w-[140px]">
-                      <StatusBadge 
-                        status={item.status || 'pending'} 
-                        onChange={(newStatus) => handleStatusChange(item.id, newStatus)} 
+                    <td className="px-4 py-4 align-top">
+                      <ActionButtons 
+                        currentStatus={item.status || 'pending'}
+                        onStatusChange={(newStatus) => handleStatusChange(item.id, newStatus)}
+                        loading={updatingId === item.id}
                       />
                     </td>
-                    <td className="px-4 py-4 align-top">
+                    <td className="px-4 py-4 align-top max-w-md">
                       <div className="space-y-2">
-                        <p className="font-bold text-slate-800 text-sm">
+                        <p className="font-medium text-slate-800 text-sm">{item.summary}</p>
+                        <ExpandableText 
+                          translated={item.translated_text} 
+                          original={item.text} 
+                          maxLength={80} 
+                        />
+                      </div>
+                    </td>
+                    {/* <td className="px-4 py-4 align-top">
+                      <div className="space-y-2">
+                        <p className="font-medium text-slate-800 text-sm">
                           {item.summary}
                         </p>
                         <p className="text-slate-600 text-xs bg-slate-50 p-2 rounded border border-slate-100">
-                          <span className="font-semibold text-slate-400 block mb-1">Translated:</span>
                           {item.translated_text}
                         </p>
                       </div>
@@ -432,7 +629,7 @@ export const Reports: React.FC = () => {
                       <p className="text-slate-500 italic text-xs max-w-xs break-words">
                         "{item.text}"
                       </p>
-                    </td>
+                    </td> */}
                   </tr>
                 ))
               )}
@@ -440,42 +637,24 @@ export const Reports: React.FC = () => {
           </table>
         </div>
         
-        {/* Pagination Controls */}
-        <div className="bg-white px-6 py-3 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-4">
-             <div className="text-xs text-slate-500">
-                Page <span className="font-medium">{currentPage}</span> of <span className="font-medium">{totalPages}</span>
-             </div>
-             
-             {/* Page Size Selector */}
-             <select 
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-                className="text-xs border border-slate-200 rounded p-1 bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500"
-             >
-                 <option value={10}>10 / page</option>
-                 <option value={20}>20 / page</option>
-                 <option value={50}>50 / page</option>
-                 <option value={100}>100 / page</option>
-                 <option value={200}>200 / page</option>
-             </select>
+        {/* Pagination */}
+        <div className="bg-white px-6 py-3 border-t border-slate-200 flex justify-between items-center">
+          <div className="text-xs text-slate-500">
+            第 {currentPage} / {totalPages} 页，共 {totalItems} 条
           </div>
-
           <div className="flex items-center gap-2">
             <button 
               onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
               disabled={currentPage === 1}
-              className="p-2 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600"
+              className="p-2 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ChevronLeft size={16} />
             </button>
-            <span className="text-sm text-slate-600 font-medium px-2">
-               {currentPage}
-            </span>
+            <span className="text-sm text-slate-600 font-medium px-2">{currentPage}</span>
             <button 
               onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
               disabled={currentPage === totalPages || totalPages === 0}
-              className="p-2 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600"
+              className="p-2 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ChevronRight size={16} />
             </button>
@@ -488,32 +667,23 @@ export const Reports: React.FC = () => {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-slate-200">
-              <h3 className="text-lg font-bold text-slate-800">AI Analysis Report</h3>
-              <button 
-                onClick={() => setShowReportModal(false)}
-                className="p-2 hover:bg-slate-100 rounded-lg"
-              >
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">
+                  {reportMeta?.appName || 'VOC'} 周报
+                </h3>
+                {reportMeta && (
+                  <p className="text-sm text-slate-500">
+                    {reportMeta.year}年 第{reportMeta.weekNumber}周 · 分析 {reportMeta.totalAnalyzed} 条
+                  </p>
+                )}
+              </div>
+              <button onClick={() => setShowReportModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
                 <X size={20} />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-6">
-              {/* Markdown 渲染 */}
-              <div className="prose prose-slate prose-sm max-w-none
-                prose-headings:text-slate-800 prose-headings:font-bold
-                prose-h1:text-xl prose-h1:border-b prose-h1:border-slate-200 prose-h1:pb-2
-                prose-h2:text-lg prose-h2:mt-6 prose-h2:mb-3
-                prose-h3:text-base prose-h3:mt-4 prose-h3:mb-2
-                prose-p:text-slate-600 prose-p:leading-relaxed
-                prose-li:text-slate-600
-                prose-strong:text-slate-800
-                prose-ul:my-2 prose-ol:my-2
-                prose-li:my-0.5
-              ">
-                <div 
-                  dangerouslySetInnerHTML={{ 
-                    __html: reportContent ? parseMarkdown(reportContent) : '' 
-                  }} 
-                />
+              <div className="prose prose-slate prose-sm max-w-none">
+                <div dangerouslySetInnerHTML={{ __html: reportContent ? parseMarkdown(reportContent) : '' }} />
               </div>
             </div>
             <div className="p-4 border-t border-slate-200 flex justify-end gap-3">
@@ -526,8 +696,7 @@ export const Reports: React.FC = () => {
                 }}
                 className="px-4 py-2 text-sm bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-2"
               >
-                <Copy size={16} />
-                复制
+                <Copy size={16} /> 复制
               </button>
               <button
                 onClick={() => {
@@ -535,9 +704,11 @@ export const Reports: React.FC = () => {
                     const blob = new Blob([reportContent], { type: 'text/markdown;charset=utf-8' });
                     const url = URL.createObjectURL(blob);
                     const link = document.createElement('a');
-                    const date = new Date().toISOString().split('T')[0];
+                    const filename = reportMeta 
+                      ? `${reportMeta.appName}_VOC_W${reportMeta.weekNumber}.md`
+                      : 'VOC_Report.md';
                     link.href = url;
-                    link.download = `VOC_Report_${date}.md`;
+                    link.download = filename;
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
@@ -546,15 +717,59 @@ export const Reports: React.FC = () => {
                 }}
                 className="px-4 py-2 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2"
               >
-                <Download size={16} />
-                下载 Markdown
+                <Download size={16} /> 下载
               </button>
-              <button
-                onClick={() => setShowReportModal(false)}
-                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
-              >
+              <button onClick={() => setShowReportModal(false)} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg">
                 关闭
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Archive Modal */}
+      {showArchive && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200">
+              <h3 className="text-lg font-bold text-slate-800">报告存档</h3>
+              <button onClick={() => setShowArchive(false)} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {loadingArchive ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="animate-spin text-blue-600" size={32} />
+                </div>
+              ) : archivedReports.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">
+                  暂无存档报告
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {archivedReports.map(report => (
+                    <button
+                      key={report.id}
+                      onClick={() => handleViewArchivedReport(report)}
+                      className="w-full text-left p-4 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-slate-800">{report.title}</h4>
+                          <p className="text-sm text-slate-500 mt-1">
+                            {report.app_name} · {report.year}年第{report.week_number}周
+                          </p>
+                        </div>
+                        <div className="text-right text-xs text-slate-400">
+                          <p>待处理: {report.pending_issues}</p>
+                          <p>已解决: {report.resolved_issues}</p>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

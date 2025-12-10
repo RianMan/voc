@@ -63,9 +63,14 @@ export function loadAllReports() {
     });
     
     const uniqueData = Array.from(uniqueMap.values());
-    console.log(`[DataLoader] Raw: ${allData.length} -> Unique: ${uniqueData.length}`);
+    // 过滤掉无效数据
+    const cleanData = uniqueData.filter(item => 
+        item.appId && item.appId !== 'Unknown' && 
+        item.country && item.country !== 'Unknown'
+    );
+    console.log(`[DataLoader] After cleanup: ${cleanData.length}`);
     
-    return uniqueData;
+    return cleanData;
 }
 
 /**
@@ -97,7 +102,12 @@ export function loadDataWithStatus() {
  */
 export function filterData(data, filters) {
     let filteredData = [...data];
-    const { category, risk, country, search, startDate, endDate, status, reportMode } = filters;
+    const { category, risk, country, search, startDate, endDate, status, reportMode, appId } = filters;
+
+    // 【新增】App筛选
+    if (appId && appId !== 'All') {
+        filteredData = filteredData.filter(item => item.appId === appId);
+    }
 
     // 状态筛选
     if (status && status !== 'All') {

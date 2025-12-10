@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
 import { Reports } from './pages/Reports';
+import { ReportArchive } from './pages/ReportArchive';
 import { fetchVocData } from './services/api';
 import { VOCItem } from './types';
 import { Loader2, RefreshCw } from 'lucide-react';
@@ -12,7 +13,6 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Initial Data Load
   useEffect(() => {
     loadData();
   }, []);
@@ -20,10 +20,8 @@ const App: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      // Fetch a larger dataset for dashboard statistics
       const result = await fetchVocData({ page: 1, limit: 1000 });
       
-      // CRITICAL FIX: Ensure we are setting the array, not the whole response object
       if (result && Array.isArray(result.data)) {
         setData(result.data);
       } else {
@@ -58,13 +56,10 @@ const App: React.FC = () => {
       case 'dashboard':
         return <Dashboard data={data} />;
       case 'reports':
-        // Reports component fetches its own data for pagination, 
-        // but we can pass initial data if needed, or just let it handle itself.
-        // For this architecture, Reports manages its own fetch.
         return <Reports />; 
+      case 'archive':
+        return <ReportArchive />;
       case 'compliance':
-        // For compliance view, we can reuse Reports with pre-set filters or pass filtered data
-        // Here we pass filtered data for the dashboard-like view, or we could create a new view
         const complianceData = data.filter(i => i.category === 'Compliance_Risk' || i.riskLevel === 'High');
         return (
           <div className="space-y-4">
@@ -78,7 +73,6 @@ const App: React.FC = () => {
                 </div>
               </div>
             </div>
-            {/* Reusing Dashboard for compliance specific stats could be good, or just a table */}
             <Dashboard data={complianceData} />
           </div>
         );
@@ -96,7 +90,6 @@ const App: React.FC = () => {
       <Sidebar currentView={currentView} setCurrentView={setCurrentView} />
       
       <main className="flex-1 ml-64 p-8 overflow-y-auto h-screen relative">
-        {/* Top Header */}
         <div className="flex justify-end mb-6">
           <button 
             onClick={handleRefresh}
