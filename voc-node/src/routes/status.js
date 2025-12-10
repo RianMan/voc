@@ -3,9 +3,13 @@ import {
     updateStatus, 
     getStatusHistory, 
     getStatusStats,
+    addNote,
+    getNotes,
+    getNotesCount,
     STATUS,
     STATUS_LABELS 
 } from '../db.js';
+import { authMiddleware, requireRole, optionalAuth } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -22,18 +26,18 @@ router.get('/status-config', (req, res) => {
 
 /**
  * PUT /api/voc/:id/status
- * 更新单条记录状态
+ * 更新单条记录状态（需要登录）
  */
-router.put('/voc/:id/status', (req, res) => {
+router.put('/voc/:id/status', authMiddleware, requireRole('admin', 'operator'), (req, res) => {
     try {
         const { id } = req.params;
-        const { status, note, operator = 'user' } = req.body;
+        const { status, note } = req.body;
         
         if (!status || !Object.values(STATUS).includes(status)) {
             return res.status(400).json({ error: 'Invalid status' });
         }
         
-        const result = updateStatus(id, status, operator, note);
+        const result = updateStatus(id, status, req.user, note);
         res.json({ success: true, ...result });
     } catch (e) {
         console.error('[Status] Update failed:', e);
@@ -43,11 +47,11 @@ router.put('/voc/:id/status', (req, res) => {
 
 /**
  * PUT /api/voc/batch-status
- * 批量更新状态
+ * 批量更新状态（需要登录）
  */
-router.put('/voc/batch-status', (req, res) => {
+router.put('/voc/batch-status', authMiddleware, requireRole('admin', 'operator'), (req, res) => {
     try {
-        const { ids, status, note, operator = 'user' } = req.body;
+        const { ids, status, note } = req.body;
         
         if (!ids || !Array.isArray(ids) || ids.length === 0) {
             return res.status(400).json({ error: 'Please provide ID list' });
@@ -57,8 +61,12 @@ router.put('/voc/batch-status', (req, res) => {
             return res.status(400).json({ error: 'Invalid status' });
         }
         
-        const results = ids.map(id => updateStatus(id, status, operator, note));
-        res.json({ success: true, updated: results.length });
+        const results = ids.map(id => updateStatus(id, status, req.user, note));
+        res.json({ 
+            success: true, 
+            updated: results.length,
+            updatedBy: req.user.display_name || req.user.username
+        });
     } catch (e) {
         console.error('[Status] Batch update failed:', e);
         res.status(500).json({ error: 'Batch update failed' });
@@ -69,11 +77,11 @@ router.put('/voc/batch-status', (req, res) => {
  * GET /api/voc/:id/history
  * 获取状态变更历史
  */
-router.get('/voc/:id/history', (req, res) => {
+router.get('/voc/:id/history', optionalAuth, (req, res) => {
     try {
         const { id } = req.params;
         const history = getStatusHistory(id);
-        res.json(history);
+        res.json({ success: true, data: history });
     } catch (e) {
         res.status(500).json({ error: 'Get history failed' });
     }
@@ -89,6 +97,68 @@ router.get('/stats/status', (req, res) => {
         res.json(stats);
     } catch (e) {
         res.status(500).json({ error: 'Get stats failed' });
+    }
+});
+
+// ==================== 备注功能 ====================
+
+/**
+ * GET /api/voc/:id/notes
+ * 获取问题备注列表
+ */
+router.get('/voc/:id/notes', optionalAuth, (req, res) => {
+    try {
+        const { id } = req.params;
+        const notes = getNotes(id);
+        res.json({ success: true, data: notes });
+    } catch (e) {
+        res.status(500).json({ error: 'Get notes failed' });
+    }
+});
+
+/**
+ * POST /api/voc/:id/notes
+ * 添加问题备注（需要登录）
+ */
+router.post('/voc/:id/notes', authMiddleware, requireRole('admin', 'operator'), (req, res) => {
+    try {
+        const { id } = req.params;
+        const { content } = req.body;
+        
+        if (!content || !content.trim()) {
+            return res.status(400).json({ error: '备注内容不能为空' });
+        }
+        
+        const userName = req.user.display_name || req.user.username;
+        const result = addNote(id, req.user.id, userName, content.trim());
+        
+        res.json({ 
+            success: true, 
+            id: result.id,
+            userName
+        });
+    } catch (e) {
+        console.error('[Notes] Add failed:', e);
+        res.status(500).json({ error: 'Add note failed' });
+    }
+});
+
+/**
+ * POST /api/voc/notes-count
+ * 批量获取备注数量
+ */
+router.post('/voc/notes-count', (req, res) => {
+    try {
+        const { ids } = req.body;
+        
+        if (!ids || !Array.isArray(ids)) {
+            return res.status(400).json({ error: 'Please provide ID list' });
+        }
+        
+        const counts = getNotesCount(ids);
+        res.json({ success: true, data: counts });
+    } catch (e) {
+        res.status(500).json({ error: 'Get notes count failed' });
     }
 });
 

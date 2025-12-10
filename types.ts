@@ -9,12 +9,14 @@ export type Category =
   | 'Other';
 
 export type ReviewStatus = 
-  | 'pending'      // 待处理
-  | 'irrelevant'   // 无意义
-  | 'confirmed'    // 已确认
-  | 'reported'     // 已反馈
-  | 'in_progress'  // 处理中
-  | 'resolved';    // 已解决
+  | 'pending'
+  | 'irrelevant'
+  | 'confirmed'
+  | 'reported'
+  | 'in_progress'
+  | 'resolved';
+
+export type UserRole = 'admin' | 'operator' | 'viewer';
 
 export const STATUS_LABELS: Record<ReviewStatus, string> = {
   pending: '待处理',
@@ -25,14 +27,18 @@ export const STATUS_LABELS: Record<ReviewStatus, string> = {
   resolved: '已解决',
 };
 
-export const STATUS_COLORS: Record<ReviewStatus, { bg: string; text: string; border: string }> = {
-  pending: { bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200' },
-  irrelevant: { bg: 'bg-gray-100', text: 'text-gray-500', border: 'border-gray-200' },
-  confirmed: { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200' },
-  reported: { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-200' },
-  in_progress: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200' },
-  resolved: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200' },
+export const ROLE_LABELS: Record<UserRole, string> = {
+  admin: '管理员',
+  operator: '操作员',
+  viewer: '访客',
 };
+
+export interface User {
+  id: number;
+  username: string;
+  displayName: string;
+  role: UserRole;
+}
 
 export interface VOCItem {
   id: string;
@@ -47,12 +53,12 @@ export interface VOCItem {
   text: string;
   translated_text: string;
   risk_level: RiskLevel;
-  riskLevel?: RiskLevel; // 兼容
+  riskLevel?: RiskLevel;
   score: number;
-  // Status fields
   status: ReviewStatus;
   statusNote?: string;
   statusUpdatedAt?: string;
+  notesCount?: number;
 }
 
 export interface PaginatedResponse {
@@ -63,13 +69,6 @@ export interface PaginatedResponse {
     limit: number;
     totalPages: number;
   };
-}
-
-export interface DashboardStats {
-  totalReviews: number;
-  highRiskCount: number;
-  complianceCount: number;
-  bugCount: number;
 }
 
 export interface FilterParams {
@@ -85,8 +84,6 @@ export interface FilterParams {
   reportMode?: boolean;
   appId?: string;
 }
-
-// ========== 新增：报告相关类型 ==========
 
 export interface AppInfo {
   appId: string;
@@ -110,35 +107,27 @@ export interface Report {
   new_issues: number;
   resolved_issues: number;
   pending_issues: number;
+  generated_by: number;
+  generated_by_name: string;
   created_at: string;
 }
 
-export interface ReportMeta {
-  appId: string;
-  appName: string;
-  weekNumber: number;
-  year: number;
-  totalAnalyzed: number;
-  newThisWeek: number;
-  resolved: number;
-  generatedAt: string;
-}
-
-export interface GenerateReportResponse {
-  success: boolean;
-  report: string;
-  meta: ReportMeta;
-  error?: string;
-}
-
-// ========== 新增：邮件订阅类型 ==========
-
-export interface EmailSubscription {
+export interface StatusLog {
   id: number;
-  app_id: string;
-  app_name: string;
-  email: string;
-  recipient_name: string;
-  is_active: number;
+  review_id: string;
+  old_status: string;
+  new_status: string;
+  user_id: number;
+  user_name: string;
+  note: string;
+  created_at: string;
+}
+
+export interface ReviewNote {
+  id: number;
+  review_id: string;
+  user_id: number;
+  user_name: string;
+  content: string;
   created_at: string;
 }

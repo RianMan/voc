@@ -2,12 +2,31 @@ import { FilterParams, PaginatedResponse, ReviewStatus, AppInfo, Report, Generat
 
 const API_BASE = '/api';
 
+// 获取存储的 token
+function getToken(): string | null {
+  return localStorage.getItem('voc_token');
+}
+
+// 带认证的 fetch
+async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    ...options.headers as Record<string, string>,
+  };
+  
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  
+  return fetch(url, { ...options, headers });
+}
+
 export async function fetchVocData(params: FilterParams): Promise<PaginatedResponse> {
   const query = new URLSearchParams();
   
   query.set('page', String(params.page));
   query.set('limit', String(params.limit));
-  if (params.reportMode) query.set('reportMode', 'true');
+  
   if (params.category && params.category !== 'All') query.set('category', params.category);
   if (params.risk && params.risk !== 'All') query.set('risk', params.risk);
   if (params.country && params.country !== 'All') query.set('country', params.country);
@@ -16,7 +35,9 @@ export async function fetchVocData(params: FilterParams): Promise<PaginatedRespo
   if (params.endDate) query.set('endDate', params.endDate);
   if (params.status && params.status !== 'All') query.set('status', params.status);
   if (params.appId && params.appId !== 'All') query.set('appId', params.appId);
-  const res = await fetch(`${API_BASE}/voc-data?${query.toString()}`);
+  if (params.reportMode) query.set('reportMode', 'true');
+
+  const res = await authFetch(`${API_BASE}/voc-data?${query.toString()}`);
   if (!res.ok) throw new Error('Fetch failed');
   return res.json();
 }
@@ -26,12 +47,16 @@ export async function updateReviewStatus(
   status: ReviewStatus, 
   note?: string
 ): Promise<{ success: boolean; oldStatus: string; newStatus: string }> {
-  const res = await fetch(`${API_BASE}/voc/${encodeURIComponent(id)}/status`, {
+  const res = await authFetch(`${API_BASE}/voc/${encodeURIComponent(id)}/status`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status, note })
   });
-  if (!res.ok) throw new Error('Update failed');
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('请先登录');
+    if (res.status === 403) throw new Error('权限不足');
+    throw new Error('Update failed');
+  }
   return res.json();
 }
 
@@ -39,26 +64,34 @@ export async function batchUpdateStatus(
   ids: string[], 
   status: ReviewStatus, 
   note?: string
-): Promise<{ success: boolean; updated: number }> {
-  const res = await fetch(`${API_BASE}/voc/batch-status`, {
+): Promise<{ success: boolean; updated: number; updatedBy?: string }> {
+  const res = await authFetch(`${API_BASE}/voc/batch-status`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids, status, note })
   });
-  if (!res.ok) throw new Error('Batch update failed');
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('请先登录');
+    if (res.status === 403) throw new Error('权限不足');
+    throw new Error('Batch update failed');
+  }
   return res.json();
 }
 
-export async function getStatusHistory(id: string): Promise<Array<{
-  id: number;
-  review_id: string;
-  old_status: string;
-  new_status: string;
-  operator: string;
-  note: string;
-  created_at: string;
-}>> {
-  const res = await fetch(`${API_BASE}/voc/${encodeURIComponent(id)}/history`);
+export async function getStatusHistory(id: string): Promise<{
+  success: boolean;
+  data: Array<{
+    id: number;
+    review_id: string;
+    old_status: string;
+    new_status: string;
+    user_id: number;
+    user_name: string;
+    note: string;
+    created_at: string;
+  }>;
+}> {
+  const res = await authFetch(`${API_BASE}/voc/${encodeURIComponent(id)}/history`);
   if (!res.ok) throw new Error('Get history failed');
   return res.json();
 }
@@ -69,7 +102,56 @@ export async function getStatusStats(): Promise<Array<{ status: string; count: n
   return res.json();
 }
 
-// ========== 旧版报告接口（兼容） ==========
+// ========== 备注相关 ==========
+
+export async function getNotes(reviewId: string): Promise<{
+  success: boolean;
+  data: Array<{
+    id: number;
+    review_id: string;
+    user_id: number;
+    user_name: string;
+    content: string;
+    created_at: string;
+  }>;
+}> {
+  const res = await authFetch(`${API_BASE}/voc/${encodeURIComponent(reviewId)}/notes`);
+  if (!res.ok) throw new Error('Get notes failed');
+  return res.json();
+}
+
+export async function addNote(reviewId: string, content: string): Promise<{
+  success: boolean;
+  id: number;
+  userName: string;
+}> {
+  const res = await authFetch(`${API_BASE}/voc/${encodeURIComponent(reviewId)}/notes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content })
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('请先登录');
+    if (res.status === 403) throw new Error('权限不足');
+    throw new Error('Add note failed');
+  }
+  return res.json();
+}
+
+export async function getNotesCount(ids: string[]): Promise<{
+  success: boolean;
+  data: Record<string, number>;
+}> {
+  const res = await fetch(`${API_BASE}/voc/notes-count`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids })
+  });
+  if (!res.ok) throw new Error('Get notes count failed');
+  return res.json();
+}
+
+// ========== 报告接口 ==========
 
 export interface ReportFilters {
   category?: string;
@@ -84,77 +166,72 @@ export async function generateReport(filters: ReportFilters = {}, limit = 100): 
   report: string;
   meta: { totalAnalyzed: number; generatedAt: string };
 }> {
-  const res = await fetch(`${API_BASE}/report/generate-qw`, {
+  const res = await authFetch(`${API_BASE}/report/generate-qw`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ filters, limit })
   });
-  if (!res.ok) throw new Error('Report generation failed');
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('请先登录');
+    if (res.status === 403) throw new Error('仅管理员可生成报告');
+    throw new Error('Report generation failed');
+  }
   return res.json();
 }
 
-// ========== 新版报告接口 ==========
-
-/**
- * 获取所有App列表
- */
 export async function fetchApps(): Promise<{ success: boolean; data: AppInfo[] }> {
   const res = await fetch(`${API_BASE}/apps`);
   if (!res.ok) throw new Error('Get apps failed');
   return res.json();
 }
 
-/**
- * 为指定App生成报告
- */
 export async function generateAppReport(
   appId: string, 
   filters: ReportFilters = {}
 ): Promise<GenerateReportResponse> {
-  const res = await fetch(`${API_BASE}/report/generate-app`, {
+  const res = await authFetch(`${API_BASE}/report/generate-app`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ appId, filters, limit: 200 })
   });
-  if (!res.ok) throw new Error('Report generation failed');
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('请先登录');
+    if (res.status === 403) throw new Error('仅管理员可生成报告');
+    throw new Error('Report generation failed');
+  }
   return res.json();
 }
 
-/**
- * 为所有App批量生成报告
- */
 export async function generateAllReports(): Promise<{
   success: boolean;
   generated: number;
   failed: number;
   results: GenerateReportResponse[];
 }> {
-  const res = await fetch(`${API_BASE}/report/generate-all`, {
+  const res = await authFetch(`${API_BASE}/report/generate-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' }
   });
-  if (!res.ok) throw new Error('Batch report generation failed');
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('请先登录');
+    if (res.status === 403) throw new Error('仅管理员可生成报告');
+    throw new Error('Batch report generation failed');
+  }
   return res.json();
 }
 
-/**
- * 获取报告存档列表
- */
 export async function fetchReports(appId?: string, limit = 50): Promise<{ success: boolean; data: Report[] }> {
   const query = new URLSearchParams();
   if (appId) query.set('appId', appId);
   query.set('limit', String(limit));
   
-  const res = await fetch(`${API_BASE}/reports?${query.toString()}`);
+  const res = await authFetch(`${API_BASE}/reports?${query.toString()}`);
   if (!res.ok) throw new Error('Get reports failed');
   return res.json();
 }
 
-/**
- * 获取单个报告详情
- */
 export async function fetchReportDetail(id: number): Promise<{ success: boolean; data: Report }> {
-  const res = await fetch(`${API_BASE}/reports/${id}`);
+  const res = await authFetch(`${API_BASE}/reports/${id}`);
   if (!res.ok) throw new Error('Get report detail failed');
   return res.json();
 }

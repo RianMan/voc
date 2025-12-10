@@ -37,42 +37,6 @@ function parseMarkdown(md: string): string {
   return html;
 }
 
-// 可展开文本组件
-const ExpandableText: React.FC<{
-  translated: string;
-  original: string;
-  maxLength?: number;
-}> = ({ translated, original, maxLength = 80 }) => {
-  const [expanded, setExpanded] = useState(false);
-  
-  const needsTruncate = translated.length > maxLength || original.length > maxLength;
-  const displayTranslated = expanded ? translated : translated.slice(0, maxLength);
-  const displayOriginal = expanded ? original : original.slice(0, maxLength);
-  
-  return (
-    <div className="text-xs space-y-1">
-      <p className="text-slate-600 bg-slate-50 p-2 rounded border border-slate-100">
-        <span className="text-slate-400 text-[10px]">翻译：</span>
-        {displayTranslated}
-        {!expanded && translated.length > maxLength && '...'}
-      </p>
-      <p className="text-slate-400 italic">
-        <span className="text-slate-300 text-[10px]">原文：</span>
-        {displayOriginal}
-        {!expanded && original.length > maxLength && '...'}
-      </p>
-      {needsTruncate && (
-        <button 
-          onClick={() => setExpanded(!expanded)}
-          className="text-blue-500 hover:text-blue-600 text-[10px]"
-        >
-          {expanded ? '收起' : '展开全部'}
-        </button>
-      )}
-    </div>
-  );
-};
-
 // 状态配置
 const STATUS_CONFIG: Record<ReviewStatus, { 
   bg: string; text: string; border: string; icon: React.ReactNode; label: string;
@@ -195,8 +159,7 @@ export const Reports: React.FC = () => {
   useEffect(() => {
     fetchApps().then(res => {
       if (res.success) {
-        const validApps = res.data.filter(app => app.appId !== 'Unknown');
-        setApps(validApps);
+        setApps(res.data);
       }
     }).catch(console.error);
   }, []);
@@ -214,7 +177,7 @@ export const Reports: React.FC = () => {
         search: debouncedSearch,
         startDate: dateRange.start,
         endDate: dateRange.end,
-        status: statusFilter,
+        status: statusFilter
       };
       
       // App筛选通过country实现（如果选择了特定App）
@@ -554,6 +517,7 @@ export const Reports: React.FC = () => {
                 <th className="px-4 py-4 whitespace-nowrap">分类</th>
                 <th className="px-4 py-4 whitespace-nowrap min-w-[200px]">操作</th>
                 <th className="px-4 py-4 whitespace-nowrap min-w-[280px]">问题摘要</th>
+                <th className="px-4 py-4 whitespace-nowrap min-w-[200px]">原文</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -605,17 +569,7 @@ export const Reports: React.FC = () => {
                         loading={updatingId === item.id}
                       />
                     </td>
-                    <td className="px-4 py-4 align-top max-w-md">
-                      <div className="space-y-2">
-                        <p className="font-medium text-slate-800 text-sm">{item.summary}</p>
-                        <ExpandableText 
-                          translated={item.translated_text} 
-                          original={item.text} 
-                          maxLength={80} 
-                        />
-                      </div>
-                    </td>
-                    {/* <td className="px-4 py-4 align-top">
+                    <td className="px-4 py-4 align-top">
                       <div className="space-y-2">
                         <p className="font-medium text-slate-800 text-sm">
                           {item.summary}
@@ -629,7 +583,7 @@ export const Reports: React.FC = () => {
                       <p className="text-slate-500 italic text-xs max-w-xs break-words">
                         "{item.text}"
                       </p>
-                    </td> */}
+                    </td>
                   </tr>
                 ))
               )}
