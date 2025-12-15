@@ -1,7 +1,8 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  LayoutDashboard, Table2, Settings, FileText, Archive, Users, LogOut, Shield, Settings2, Eye 
+  LayoutDashboard, Table2, Settings, FileText, Archive, Users, LogOut, Shield, Settings2, Eye,
+  Coins
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -16,6 +17,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView })
     { id: 'dashboard', label: '概览', icon: LayoutDashboard, roles: ['admin', 'operator', 'viewer'] },
     { id: 'reports', label: '问题处理', icon: Table2, roles: ['admin', 'operator', 'viewer'] },
     { id: 'archive', label: '报告存档', icon: Archive, roles: ['admin', 'operator', 'viewer'] },
+    { id: 'costs', label: 'AI 费用统计', icon: Coins, roles: ['admin'] },
     { id: 'users', label: '用户管理', icon: Users, roles: ['admin'] },
     { id: 'settings', label: '设置', icon: Settings, roles: ['admin'] },
   ];

@@ -160,7 +160,7 @@ ${JSON.stringify(summary.topIssues, null, 2)}
     let report = completion.choices[0].message.content.trim();
 
     const currentDate = getCurrentDate();
-    report += `\n\n---\n*报告生成时间：${currentDate} | 模型：通义千问 qwen-max*`;
+    report += `\n\n---\n*报告生成时间：${currentDate} | 模型：通义千问 qwen3-max*`;
 
     return {
         success: true,
@@ -168,7 +168,7 @@ ${JSON.stringify(summary.topIssues, null, 2)}
         meta: {
             totalAnalyzed: reportData.length,
             generatedAt: new Date().toISOString(),
-            model: 'qwen-max',
+            model: 'qwen3-max',
             usage: completion.usage
         }
     };

@@ -1,29 +1,92 @@
 import { Router } from 'express';
 import { loadDataWithStatus, filterData, paginate } from '../services/dataLoader.js';
+// [新增] 导入数据库操作方法
+import { getNotes, addNote, getStatusHistory, getCostStats } from '../db.js';
 
 const router = Router();
 
 /**
- * GET /api/voc-data
+ * GET /api/voc/voc-data
  * 获取VOC数据列表（支持筛选和分页）
  */
 router.get('/voc-data', (req, res) => {
+    // ... (保持原有代码不变)
     try {
         const { page = 1, limit = 10, ...filters } = req.query;
-        
-        // 加载数据（含状态）
         let data = loadDataWithStatus();
-        
-        // 应用筛选
         data = filterData(data, filters);
-        
-        // 分页
         const result = paginate(data, page, limit);
-        
         res.json(result);
     } catch (e) {
         console.error('[VOC] Get data failed:', e);
         res.status(500).json({ error: 'Get data failed' });
+    }
+});
+
+// ==================== [新增] 备注与历史相关接口 ====================
+
+/**
+ * GET /api/voc/:id/notes
+ * 获取指定评论的备注列表
+ */
+router.get('/:id/notes', (req, res) => {
+    try {
+        const { id } = req.params;
+        const notes = getNotes(id);
+        res.json({ success: true, data: notes });
+    } catch (e) {
+        console.error('[VOC] Get notes failed:', e);
+        res.status(500).json({ error: 'Get notes failed' });
+    }
+});
+
+/**
+ * POST /api/voc/:id/notes
+ * 添加备注
+ */
+router.post('/:id/notes', (req, res) => {
+    try {
+        const { id } = req.params;
+        const { content } = req.body;
+        // 尝试从 req.user 获取用户信息 (如果有 auth 中间件)，否则使用默认值
+        const userId = req.user?.id || 0;
+        const userName = req.user?.username || req.user?.display_name || 'Operator';
+
+        const result = addNote(id, userId, userName, content);
+        res.json({ success: true, id: result.id });
+    } catch (e) {
+        console.error('[VOC] Add note failed:', e);
+        res.status(500).json({ error: 'Add note failed' });
+    }
+});
+
+/**
+ * GET /api/voc/:id/history
+ * 获取状态变更历史
+ */
+router.get('/:id/history', (req, res) => {
+    try {
+        const { id } = req.params;
+        const history = getStatusHistory(id);
+        res.json({ success: true, data: history });
+    } catch (e) {
+        console.error('[VOC] Get history failed:', e);
+        res.status(500).json({ error: 'Get history failed' });
+    }
+});
+
+/**
+ * GET /api/voc/costs
+ * 获取 AI 费用统计
+ */
+router.get('/costs', (req, res) => {
+    try {
+        const stats = getCostStats();
+        console.log(stats, 'stats');
+        res.json({ success: true, data: stats });
+    } catch (e) {
+        console.error('[VOC] Get cost stats failed:', e);
+        res.status(500).json({ error: 'Get cost stats failed' });
     }
 });
 

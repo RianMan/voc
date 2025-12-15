@@ -21,6 +21,7 @@ const COUNTRY_NAMES: Record<string, string> = {
 export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   // Defensive check: ensure data is an array
   const safeData = Array.isArray(data) ? data : [];
+  
 
   // Calculate Stats
   const total = safeData.length;

@@ -5,6 +5,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Reports } from './pages/Reports';
 import { ReportArchive } from './pages/ReportArchive';
 import { UserManagement } from './pages/UserManagement';
+import { CostOverview } from './pages/CostOverview';
 import { LoginPage } from './pages/LoginPage';
 import { fetchVocData } from './services/api';
 import { VOCItem } from './types';
@@ -81,6 +82,8 @@ const MainApp: React.FC = () => {
         return <Reports />; 
       case 'archive':
         return <ReportArchive />;
+      case 'costs':
+        return <CostOverview />;
       case 'users':
         return <UserManagement />;
       case 'settings':

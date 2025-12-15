@@ -14,6 +14,7 @@ import {
   getAllApps,
   upsertAppConfig
 } from '../db.js';
+import { authMiddleware } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -57,7 +58,7 @@ router.post('/report/generate-qw', async (req, res) => {
  * POST /api/report/generate-app
  * 【新】为指定App生成周报
  */
-router.post('/report/generate-app', async (req, res) => {
+router.post('/report/generate-app', authMiddleware, async (req, res) => {
   try {
     const { appId, filters = {}, limit = 200 } = req.body;
     
@@ -65,7 +66,7 @@ router.post('/report/generate-app', async (req, res) => {
       return res.status(400).json({ error: 'appId is required' });
     }
     
-    const result = await generateReportForApp(appId, filters, limit);
+    const result = await generateReportForApp(appId, filters, limit, req.user); 
     res.json(result);
   } catch (e) {
     console.error('[Report-App] Generation failed:', e);

@@ -4,7 +4,8 @@ import {
   saveReport, 
   getLastReport, 
   ACTIVE_STATUSES,
-  getStatusBatch 
+  getStatusBatch,
+  recordAICost
 } from '../db.js';
 import Database from 'better-sqlite3';
 import path from 'path';
@@ -110,59 +111,40 @@ function summarizeByOperator(logs) {
   return Object.values(summary).sort((a, b) => b.total - a.total);
 }
 
-const REPORT_PROMPT = `你是一个专业的金融科技产品运营分析师，负责分析用户反馈(VOC)数据并生成周报。
+const REPORT_PROMPT = `你是一个专业的金融科技产品运营专家。你的任务是基于详细的数据分析字段（如根本原因、行动建议），生成一份**深度复盘**风格的周报。
 
 ## 输出要求
-1. 使用中文撰写
-2. 使用 Markdown 格式
-3. **禁止使用表格**，改用列表形式展示数据
-4. 结构清晰，重点突出
-5. **不要在报告中写生成时间**，系统会自动添加
+1. **严禁生成标题**。
+2. **严禁生成时间**。
+3. **禁止表格**，使用清晰的 Markdown 列表。
+4. 语言风格：专业、犀利、直接。拒绝正确的废话。
 
 ## 报告结构
 
 ### 1. 本周概览
-- 本周待处理问题总数
-- 新增问题数（相比上周）
-- 已解决问题数
-- 处理率（已解决/上周遗留+本周新增）
+- 核心指标（待处理/新增/已解决）
+- **风险态势**：一句话总结本周的核心痛点（如：本周产品类投诉激增，主要集中在下单流程误解）。
 
 ### 2. 本周处理记录 ⭐
-按处理人汇总本周的工作：
-- 谁解决了多少问题
-- 谁确认/反馈了多少问题
-- 具体处理了哪些问题（列出摘要）
+(按处理人汇总)
 
-### 3. 问题状态分布
-- 待处理：X条
-- 已确认：X条
-- 处理中：X条
-- 已反馈：X条
+### 3. 问题状态/分类分布
+(中文状态，过滤掉好评的分类)
 
-### 4. 问题分类统计
-按 Tech_Bug / Compliance_Risk / Product_Issue 等分类统计
+### 4. 高优先级问题深度剖析（核心价值版块）
+请直接引用 JSON 数据中的分析结论，不要自己瞎编。格式如下：
+- **🔴 问题**：[summary]
+- **🕒 时间**：YYYY-MM-DD (遗留：是/否)
+- **🧠 归因**：[rootCause] (这是关键，直接展示数据中的归因)
+- **🔧 建议**：[actionAdvice] (这是关键，直接展示数据中的建议)
+- **💬 待回复**：(仅当未回复时展示 suggestedReply)
 
-### 5. 高优先级问题（需立即处理）
-列出 High 风险且未解决的问题，标注：
-- 问题摘要
-- 首次出现时间
-- 是否为遗留问题（连续出现2周以上标红）
+### 5. 本周 vs 上周对比
+(简要)
 
-### 6. 本周 vs 上周对比
-- 新增问题趋势（增加/减少 X%）
-- 各分类变化情况
-- 处理效率变化
-
-### 7. 行动建议
-- 紧急（24小时内）
-- 本周内
-- 持续关注
-
-## 风格
-- 简洁、可执行
-- 高风险项用 **加粗** 或 🔴 标注
-- 遗留超过2周的问题用 ⚠️ 标注
-- 处理记录要突出表扬积极处理问题的同事 👍
+### 6. 总结与行动计划
+- **紧急阻断**：针对合规风险的措施。
+- **产品/体验优化**：基于上面的“归因”和“建议”，制定本周的产品优化计划（例如：优化下单页UI、修改短信文案）。
 `;
 
 /**
@@ -250,7 +232,11 @@ function prepareAppReportData(items, lastReport) {
       category: item.category,
       date: item.date,
       status: item.status || 'pending',
-      isLegacy: new Date(item.date) < twoWeeksAgo
+      isLegacy: new Date(item.date) < twoWeeksAgo,
+      hasReply: !!item.replyText,
+      rootCause: item.root_cause || "AI未归因",
+      actionAdvice: item.action_advice || "建议人工复核",
+      suggestedReply: item.suggested_reply || "Please contact support."
     }));
 
   // 获取本周操作记录
@@ -341,6 +327,11 @@ export async function generateAppReport(appId, appName, items, options = {}, use
   }
 
   const client = getClient();
+
+  const isQwen = !!process.env.TONGYI_API_KEY;
+  const provider = isQwen ? 'qwen' : 'deepseek';
+  const model = isQwen ? 'qwen3-max' : 'deepseek-chat';
+
   const weekNum = getWeekNumber();
   const year = new Date().getFullYear();
 
@@ -367,50 +358,42 @@ export async function generateAppReport(appId, appName, items, options = {}, use
     }).join('\n');
   }
 
-  const userPrompt = `请为 **${appName}** 生成第 ${weekNum} 周的VOC分析周报。
+  const filteredCategoryStats = { ...reportData.categoryStats };
+  delete filteredCategoryStats['Positive'];
+  delete filteredCategoryStats['Other'];
+  delete filteredCategoryStats['positive']; // 防御大小写
+  delete filteredCategoryStats['other'];
 
-## 数据摘要
-- 当前待处理问题：${reportData.totalActive} 条
-- 本周新增：${reportData.newThisWeek} 条
-- 本周已解决：${reportData.resolvedThisWeekCount} 条
-- 遗留超过2周：${reportData.legacyCount} 条
+  const userPrompt = `请为 **${appName}** 生成 ${year}年 第 ${weekNum} 周的VOC分析周报。
 
-## 状态分布
-- 待处理：${reportData.statusBreakdown.pending}
-- 已确认：${reportData.statusBreakdown.confirmed}
-- 已反馈：${reportData.statusBreakdown.reported}
-- 处理中：${reportData.statusBreakdown.in_progress}
+    ## 数据摘要
+    - 待处理：${reportData.totalActive}
+    - 新增：${reportData.newThisWeek}
+    - 遗留 >2周：${reportData.legacyCount}
 
-## 本周处理记录（按人员汇总）
-${operatorText}
+    ## 统计
+    - 状态：${JSON.stringify(reportData.statusBreakdown)}
+    - 分类：${JSON.stringify(filteredCategoryStats)}
+    - 风险：${JSON.stringify(reportData.riskStats)}
 
-## 本周解决的问题详情
-${resolvedDetailText}
+    ## 高优先级问题清单 (包含深度分析数据)
+    注意：
+    1. 请重点展示 'rootCause'(根本原因) 和 'actionAdvice'(行动建议) 字段。
+    2. 如果 'hasReply' 为 false，请展示 'suggestedReply'。
+    
+    ${JSON.stringify(reportData.highPriorityIssues, null, 2)}
 
-## 问题分类
-${JSON.stringify(reportData.categoryStats)}
+    ## 处理记录 & 解决详情
+    ${operatorText}
+    ${resolvedDetailText}
 
-## 风险分布
-${JSON.stringify(reportData.riskStats)}
+    ${reportData.comparison ? `## 对比：待处理变化 ${reportData.comparison.changePercent}%` : '首次生成'}
 
-## 高优先级问题
-${JSON.stringify(reportData.highPriorityIssues, null, 2)}
-
-## 遗留问题（超过2周）
-${JSON.stringify(reportData.legacyIssues, null, 2)}
-
-${reportData.comparison ? `
-## 与上周对比
-- 上周待处理：${reportData.comparison.lastWeekTotal} 条
-- 上周新增：${reportData.comparison.lastWeekNew} 条
-- 上周解决：${reportData.comparison.lastWeekResolved} 条
-- 变化：${reportData.comparison.changePercent > 0 ? '+' : ''}${reportData.comparison.changePercent}%
-` : '## 上周对比\n首次生成报告，无历史数据对比'}
-
-请生成完整的周报，特别注意要在"本周处理记录"部分详细展示每个人的工作贡献：`;
+    请生成周报。重点：**把每一条高危问题都当做一个产品需求单来写，分析原因并给出方案。**
+    `;
 
   const completion = await client.chat.completions.create({
-    model: process.env.TONGYI_API_KEY ? 'qwen-max' : 'deepseek-chat',
+    model: model,
     max_tokens: 4000,
     temperature: 0.3,
     messages: [
@@ -419,15 +402,23 @@ ${reportData.comparison ? `
     ]
   });
 
+  if (completion.usage) {
+      recordAICost(provider, model, 'report', completion.usage);
+  }
+
   let report = completion.choices[0].message.content.trim();
+
+  report = report.replace(/^#\s+.*?\n+/, '');
   
   // 添加报告头部
-  const title = `${appName} GP VOC 周报 W${weekNum}`;
+  const title = `${appName} GP VOC 周报 ${year} W${weekNum}`;
   report = `# ${title}\n\n${report}`;
   
   // 添加元信息
   const currentDate = getCurrentDate();
-  const generatorName = user?.display_name || user?.username || '系统';
+  // 优先取 display_name (数据库字段), 其次 username, 再次 name (JWT常用), 最后 fallback
+  const generatorName = user?.display_name || user?.username || user?.name || '管理员'; 
+  
   report += `\n\n---\n*报告生成时间：${currentDate} | 生成人：${generatorName}*`;
 
   // 保存到数据库

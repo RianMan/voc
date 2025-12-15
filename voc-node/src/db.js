@@ -104,6 +104,81 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_reports_app_id ON reports(app_id);
 `);
 
+// ==================== [新增] 费用记录表 ====================
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ai_costs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT,        -- 'deepseek' 或 'qwen'
+    model TEXT,           -- 具体模型名
+    operation_type TEXT,  -- 'analysis' (评论分析) 或 'report' (生成周报)
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    total_cost REAL,      -- 计算后的费用(元)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// 价格配置 (单位: 元/百万Token)
+const PRICING = {
+  deepseek: {
+    input: 2.0,   // 缓存未命中 (按最贵算，确保预算充足)
+    output: 3.0
+  },
+  qwen: {
+    input: 3.2,   // 0.0032元/千Token = 3.2元/百万
+    output: 12.8  // 0.0128元/千Token = 12.8元/百万
+  }
+};
+
+export function recordAICost(provider, model, type, usage) {
+  if (!usage) return;
+
+  const input = usage.prompt_tokens || 0;
+  const output = usage.completion_tokens || 0;
+  
+  // 确定价格策略 (默认 DeepSeek)
+  const prices = provider.includes('qwen') || provider.includes('aliyun') 
+    ? PRICING.qwen 
+    : PRICING.deepseek;
+
+  // 计算费用 (输入/100万 * 单价 + 输出/100万 * 单价)
+  const cost = (input / 1000000 * prices.input) + (output / 1000000 * prices.output);
+
+  const stmt = db.prepare(`
+    INSERT INTO ai_costs (provider, model, operation_type, input_tokens, output_tokens, total_cost)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  
+  stmt.run(provider, model, type, input, output, cost);
+  
+  return cost;
+}
+
+export function getCostStats() {
+  // 总费用
+  const total = db.prepare('SELECT SUM(total_cost) as total FROM ai_costs').get();
+  
+  // 本周费用
+  const weekly = db.prepare(`
+    SELECT SUM(total_cost) as total 
+    FROM ai_costs 
+    WHERE created_at >= date('now', 'weekday 0', '-7 days')
+  `).get();
+
+  // 按类型统计 (分析 vs 报告)
+  const byType = db.prepare(`
+    SELECT operation_type, SUM(total_cost) as cost, SUM(output_tokens) as tokens
+    FROM ai_costs 
+    GROUP BY operation_type
+  `).all();
+
+  return {
+    total: total.total || 0,
+    weekly: weekly.total || 0,
+    breakdown: byType
+  };
+}
+
 // ==================== 密码工具 ====================
 export function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');

@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
+import { recordAICost } from './db.js';
 
 dotenv.config();
 
@@ -15,20 +16,21 @@ const openai = new OpenAI({
 });
 
 const SYSTEM_PROMPT = `
-你是一个金融App的风控与VOC专家。你的任务是分析用户的评论。
+你是一位资深的金融App产品经理和用户体验专家。你的核心能力不仅仅是总结评论，而是通过用户反馈洞察产品设计缺陷、运营流程漏洞或合规风险。
+
 请提取关键信息并返回JSON格式。
 
 【分类定义】:
-- Tech_Bug: 无法登录、崩溃、OTP收不到、上传失败、界面卡顿。
-- Compliance_Risk: 提到 police(报警), court(法院), harass(骚扰), suicide(自杀), abuse(辱骂), call family(打给家人)。【最高优先级】
-- Product_Issue: 抱怨利息高(high interest), 额度低, 期限短, 乱扣费。
+- Tech_Bug: 无法登录、崩溃、OTP问题、界面卡顿。
+- Compliance_Risk: 威胁、恐吓、骚扰、联系家人、非法、报警、监管投诉。【最高优先级】
+- Product_Issue: 流程费解(如下单误解)、无法取消、额度/利息抱怨、扣费不明。
 - Positive: 好评。
 - User_Error: 用户误操作。
 - Other: 无意义内容。
 
 【风险等级定义】:
-- High: 涉及合规风险(Compliance_Risk)或严重Bug(无法还款/放款)。
-- Medium: 普通Bug或强烈的利息抱怨。
+- High: 合规风险、资金损失、严重阻断性Bug。
+- Medium: 强烈的体验抱怨（如误操作导致贷款）、利息抱怨。
 - Low: 其他。
 `;
 
@@ -93,16 +95,27 @@ async function analyzeFile(rawFilePath) {
 }
 
 async function analyzeBatch(reviews) {
-    const payload = reviews.map(r => ({ id: r.id, text: r.text }));
+    const payload = reviews.map(r => ({ 
+        id: r.id, 
+        text: r.text,
+        score: r.score // 传入评分
+    }));
 
     const userPrompt = `
-    请分析以下评论，返回 JSON 数组。
+    请深度分析以下用户评论，返回 JSON 数组。
     每个对象需包含: 
     "id", 
     "category" (Tech_Bug / Compliance_Risk / Product_Issue / Positive / User_Error / Other), 
-    "summary" (中文一句话摘要), 
+    "summary" (中文一句话摘要，例如：用户误以为填表单是验额度，结果直接放款了), 
     "risk_level" (High/Medium/Low),
-    "translated_text" (必须翻译！将评论翻译成通顺的简体中文)。
+    "translated_text" (翻译成通顺的简体中文),
+    
+    // 新增：深度分析字段
+    "root_cause": (中文，深度归因。分析用户为什么会遇到这个问题？例如：下单按钮文案有歧义、防诈骗提示不明显、催收话术过激),
+    "action_advice": (中文，行动建议。针对产品或运营的具体优化策略。例如：建议将“申请”按钮改为“确认提现”、增加二次确认弹窗、核查代理商ID),
+    
+    // 新增：高情商回复
+    "suggested_reply": (当地语言回复。要求：1. 极度共情，像真人一样对话；2. 必须引用用户提到的具体细节（如“360天”、“800额度”）；3. 严禁使用“We sincerely apologize”等机械套话，直接说人话；4. 给出具体指引。)
 
     评论数据:
     ${JSON.stringify(payload)}
@@ -116,8 +129,13 @@ async function analyzeBatch(reviews) {
             ],
             model: "deepseek-chat",
             response_format: { type: "json_object" },
-            temperature: 0.1
+            temperature: 0.2
         });
+
+        if (completion.usage) {
+            const cost = recordAICost('deepseek', 'deepseek-chat', 'analysis', completion.usage);
+            console.log(`   💰 本批次花费: ¥${cost.toFixed(4)}`);
+        }
 
         const content = completion.choices[0].message.content;
         let aiResults = [];
@@ -141,7 +159,9 @@ async function analyzeBatch(reviews) {
                 country: original?.country || "Unknown",
                 appId: original?.appId || "Unknown",
                 appName: original?.appName || "",
-                version: original?.version || "Unknown"
+                version: original?.version || "Unknown",
+                replyText: original?.replyText || null, // GP 上已有的回复
+                replyDate: original?.replyDate || null
             };
         });
 

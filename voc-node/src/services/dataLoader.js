@@ -57,6 +57,9 @@ export function loadAllReports() {
     // 按ID去重
     const uniqueMap = new Map();
     allData.forEach(item => {
+        if (item.appName === 'Unknown' || item.appId === 'Unknown') {
+            return;
+        }
         if (item && item.id) {
             uniqueMap.set(item.id, item);
         }
@@ -153,8 +156,20 @@ export function filterData(data, filters) {
         });
     }
 
-    // 按日期排序
-    filteredData.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+    // ✅ 新的逻辑：先状态分层，再日期排序
+    filteredData.sort((a, b) => {
+        // 1. 定义哪些状态属于“已结束/非活跃”（需要沉底）
+        const isFinishedA = ['resolved', 'irrelevant'].includes(a.status);
+        const isFinishedB = ['resolved', 'irrelevant'].includes(b.status);
+
+        // 2. 如果状态性质不同（一个活跃、一个已结束），则活跃的排在前面
+        if (isFinishedA !== isFinishedB) {
+            return isFinishedA ? 1 : -1; // A是结束态 -> A放后面(1); A是活跃态 -> A放前面(-1)
+        }
+
+        // 3. 如果状态性质相同（都是活跃，或者都是已结束），则按日期倒序（新的在前）
+        return new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime();
+    });
 
     return filteredData;
 }
