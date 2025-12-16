@@ -28,7 +28,7 @@ router.get('/status-config', (req, res) => {
  * PUT /api/voc/:id/status
  * 更新单条记录状态（需要登录）
  */
-router.put('/voc/:id/status', authMiddleware, requireRole('admin', 'operator'), (req, res) => {
+router.put('/voc/:id/status', authMiddleware, requireRole('admin', 'operator'), async (req, res) => {
     try {
         const { id } = req.params;
         const { status, note } = req.body;
@@ -37,7 +37,7 @@ router.put('/voc/:id/status', authMiddleware, requireRole('admin', 'operator'), 
             return res.status(400).json({ error: 'Invalid status' });
         }
         
-        const result = updateStatus(id, status, req.user, note);
+        const result = await updateStatus(id, status, req.user, note);
         res.json({ success: true, ...result });
     } catch (e) {
         console.error('[Status] Update failed:', e);
@@ -49,7 +49,7 @@ router.put('/voc/:id/status', authMiddleware, requireRole('admin', 'operator'), 
  * PUT /api/voc/batch-status
  * 批量更新状态（需要登录）
  */
-router.put('/voc/batch-status', authMiddleware, requireRole('admin', 'operator'), (req, res) => {
+router.put('/voc/batch-status', authMiddleware, requireRole('admin', 'operator'), async (req, res) => {
     try {
         const { ids, status, note } = req.body;
         
@@ -61,7 +61,10 @@ router.put('/voc/batch-status', authMiddleware, requireRole('admin', 'operator')
             return res.status(400).json({ error: 'Invalid status' });
         }
         
-        const results = ids.map(id => updateStatus(id, status, req.user, note));
+        const results = await Promise.all(
+            ids.map(id => updateStatus(id, status, req.user, note))
+        );
+        
         res.json({ 
             success: true, 
             updated: results.length,
@@ -77,10 +80,10 @@ router.put('/voc/batch-status', authMiddleware, requireRole('admin', 'operator')
  * GET /api/voc/:id/history
  * 获取状态变更历史
  */
-router.get('/voc/:id/history', optionalAuth, (req, res) => {
+router.get('/voc/:id/history', optionalAuth, async (req, res) => {
     try {
         const { id } = req.params;
-        const history = getStatusHistory(id);
+        const history = await getStatusHistory(id);
         res.json({ success: true, data: history });
     } catch (e) {
         res.status(500).json({ error: 'Get history failed' });
@@ -91,9 +94,9 @@ router.get('/voc/:id/history', optionalAuth, (req, res) => {
  * GET /api/stats/status
  * 获取状态统计
  */
-router.get('/stats/status', (req, res) => {
+router.get('/stats/status', async (req, res) => {
     try {
-        const stats = getStatusStats();
+        const stats = await getStatusStats();
         res.json(stats);
     } catch (e) {
         res.status(500).json({ error: 'Get stats failed' });
@@ -106,10 +109,10 @@ router.get('/stats/status', (req, res) => {
  * GET /api/voc/:id/notes
  * 获取问题备注列表
  */
-router.get('/voc/:id/notes', optionalAuth, (req, res) => {
+router.get('/voc/:id/notes', optionalAuth, async (req, res) => {
     try {
         const { id } = req.params;
-        const notes = getNotes(id);
+        const notes = await getNotes(id);
         res.json({ success: true, data: notes });
     } catch (e) {
         res.status(500).json({ error: 'Get notes failed' });
@@ -120,7 +123,7 @@ router.get('/voc/:id/notes', optionalAuth, (req, res) => {
  * POST /api/voc/:id/notes
  * 添加问题备注（需要登录）
  */
-router.post('/voc/:id/notes', authMiddleware, requireRole('admin', 'operator'), (req, res) => {
+router.post('/voc/:id/notes', authMiddleware, requireRole('admin', 'operator'), async (req, res) => {
     try {
         const { id } = req.params;
         const { content } = req.body;
@@ -130,7 +133,7 @@ router.post('/voc/:id/notes', authMiddleware, requireRole('admin', 'operator'), 
         }
         
         const userName = req.user.display_name || req.user.username;
-        const result = addNote(id, req.user.id, userName, content.trim());
+        const result = await addNote(id, req.user.id, userName, content.trim());
         
         res.json({ 
             success: true, 
@@ -147,7 +150,7 @@ router.post('/voc/:id/notes', authMiddleware, requireRole('admin', 'operator'), 
  * POST /api/voc/notes-count
  * 批量获取备注数量
  */
-router.post('/voc/notes-count', (req, res) => {
+router.post('/voc/notes-count', async (req, res) => {
     try {
         const { ids } = req.body;
         
@@ -155,7 +158,7 @@ router.post('/voc/notes-count', (req, res) => {
             return res.status(400).json({ error: 'Please provide ID list' });
         }
         
-        const counts = getNotesCount(ids);
+        const counts = await getNotesCount(ids);
         res.json({ success: true, data: counts });
     } catch (e) {
         res.status(500).json({ error: 'Get notes count failed' });

@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { loadDataWithStatus, filterData, paginate } from '../services/dataLoader.js';
-// [新增] 导入数据库操作方法
 import { getNotes, addNote, getStatusHistory, getCostStats } from '../db.js';
 
 const router = Router();
@@ -9,11 +8,10 @@ const router = Router();
  * GET /api/voc/voc-data
  * 获取VOC数据列表（支持筛选和分页）
  */
-router.get('/voc-data', (req, res) => {
-    // ... (保持原有代码不变)
+router.get('/voc-data', async (req, res) => {
     try {
         const { page = 1, limit = 10, ...filters } = req.query;
-        let data = loadDataWithStatus();
+        let data = await loadDataWithStatus();
         data = filterData(data, filters);
         const result = paginate(data, page, limit);
         res.json(result);
@@ -23,16 +21,16 @@ router.get('/voc-data', (req, res) => {
     }
 });
 
-// ==================== [新增] 备注与历史相关接口 ====================
+// ==================== 备注与历史相关接口 ====================
 
 /**
  * GET /api/voc/:id/notes
  * 获取指定评论的备注列表
  */
-router.get('/:id/notes', (req, res) => {
+router.get('/:id/notes', async (req, res) => {
     try {
         const { id } = req.params;
-        const notes = getNotes(id);
+        const notes = await getNotes(id);
         res.json({ success: true, data: notes });
     } catch (e) {
         console.error('[VOC] Get notes failed:', e);
@@ -44,15 +42,14 @@ router.get('/:id/notes', (req, res) => {
  * POST /api/voc/:id/notes
  * 添加备注
  */
-router.post('/:id/notes', (req, res) => {
+router.post('/:id/notes', async (req, res) => {
     try {
         const { id } = req.params;
         const { content } = req.body;
-        // 尝试从 req.user 获取用户信息 (如果有 auth 中间件)，否则使用默认值
         const userId = req.user?.id || 0;
         const userName = req.user?.username || req.user?.display_name || 'Operator';
 
-        const result = addNote(id, userId, userName, content);
+        const result = await addNote(id, userId, userName, content);
         res.json({ success: true, id: result.id });
     } catch (e) {
         console.error('[VOC] Add note failed:', e);
@@ -64,10 +61,10 @@ router.post('/:id/notes', (req, res) => {
  * GET /api/voc/:id/history
  * 获取状态变更历史
  */
-router.get('/:id/history', (req, res) => {
+router.get('/:id/history', async (req, res) => {
     try {
         const { id } = req.params;
-        const history = getStatusHistory(id);
+        const history = await getStatusHistory(id);
         res.json({ success: true, data: history });
     } catch (e) {
         console.error('[VOC] Get history failed:', e);
@@ -79,9 +76,9 @@ router.get('/:id/history', (req, res) => {
  * GET /api/voc/costs
  * 获取 AI 费用统计
  */
-router.get('/costs', (req, res) => {
+router.get('/costs', async (req, res) => {
     try {
-        const stats = getCostStats();
+        const stats = await getCostStats();
         console.log(stats, 'stats');
         res.json({ success: true, data: stats });
     } catch (e) {

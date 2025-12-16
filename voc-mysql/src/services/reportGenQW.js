@@ -1,20 +1,28 @@
 import OpenAI from 'openai';
 import { loadAllReports, filterData } from './dataLoader.js';
+import { recordAICost } from '../db.js';
 
 // 延迟初始化
-let openai = null;
+let client = null;
 
-function getOpenAIClient() {
-    if (!openai) {
-        openai = new OpenAI({
-            baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
-            apiKey: process.env.DEEPSEEK_API_KEY,
+function getClaudeClient() {
+    if (!client) {
+        const apiKey = process.env.TONGYI_API_KEY || process.env.CLAUDE_API_KEY;
+
+        if (!apiKey) {
+            throw new Error('请在 .env 中设置 TONGYI_API_KEY 或 CLAUDE_API_KEY');
+        }
+
+        console.log('[通义千问] API Key loaded:', apiKey.substring(0, 12) + '...');
+
+        client = new OpenAI({
+            apiKey,
+            baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         });
     }
-    return openai;
+    return client;
 }
 
-// 获取当前日期
 function getCurrentDate() {
     return new Date().toLocaleDateString('zh-CN', {
         year: 'numeric',
@@ -48,33 +56,27 @@ const REPORT_PROMPT = `你是一个专业的金融科技产品运营分析师，
 - 直接、简洁、可执行
 - 使用 bullet points 而非长段落
 - 高风险项用 **加粗** 标注
-- 给出具体、可操作的建议，而非泛泛而谈
-`;
+- 给出具体、可操作的建议，而非泛泛而谈`;
 
-/**
- * 准备报告数据摘要
- */
 function prepareReportSummary(data) {
     const categoryStats = {};
-    const riskStats = { High: 0, Medium: 0 };
+    const riskStats = { High: 0, Medium: 0, Low: 0 };
     const countryStats = {};
     const summaries = [];
 
-    // 找出日期范围
     let minDate = null;
     let maxDate = null;
 
     data.forEach(item => {
-        const cat = item.category || 'Other';
+        const cat = item.category || '其他';
         categoryStats[cat] = (categoryStats[cat] || 0) + 1;
 
         const risk = item.risk_level || item.riskLevel || 'Medium';
         if (riskStats[risk] !== undefined) riskStats[risk]++;
 
-        const country = item.country || 'Unknown';
+        const country = item.country || '未知';
         countryStats[country] = (countryStats[country] || 0) + 1;
 
-        // 日期范围
         if (item.date) {
             const d = new Date(item.date);
             if (!minDate || d < minDate) minDate = d;
@@ -86,14 +88,12 @@ function prepareReportSummary(data) {
                 category: cat,
                 risk: risk,
                 summary: item.summary,
-                country: country,
-                date: item.date
+                country: country
             });
         }
     });
 
-    // 格式化日期
-    const formatDate = (d) => d ? d.toLocaleDateString('zh-CN') : 'N/A';
+    const formatDate = (d) => d ? d.toLocaleDateString('zh-CN') : '未知';
 
     return {
         totalCount: data.length,
@@ -104,76 +104,78 @@ function prepareReportSummary(data) {
         categoryStats,
         riskStats,
         countryStats,
-        // 按风险排序，高风险优先
         topIssues: summaries
             .sort((a, b) => {
-                const riskOrder = { High: 0, Medium: 1, Low: 2 };
-                return (riskOrder[a.risk] || 2) - (riskOrder[b.risk] || 2);
+                const order = { High: 0, Medium: 1, Low: 2 };
+                return (order[a.risk] || 3) - (order[b.risk] || 3);
             })
             .slice(0, 50)
     };
 }
 
-/**
- * 生成 AI 报告
- */
-export async function generateReport(filters = {}, limit = 100) {
+export async function generateReportWithQW(filters = {}, limit = 100) {
     let data = loadAllReports();
-    
     filters.reportMode = true;
     data = filterData(data, filters);
-    
+
     const reportData = data.slice(0, limit);
-    
+
     if (reportData.length === 0) {
         return {
             success: false,
             report: '没有找到符合条件的数据',
-            meta: { totalAnalyzed: 0, generatedAt: new Date().toISOString() }
+            meta: { totalAnalyzed: 0, model: 'qwen3-max' }
         };
     }
 
     const summary = prepareReportSummary(reportData);
+    const client = getClaudeClient();
 
-    const client = getOpenAIClient();
-    
+    console.log('[通义千问] 正在生成报告...');
+
     const completion = await client.chat.completions.create({
+        model: "qwen3-max",
+        max_tokens: 4000,
+        temperature: 0.3,
         messages: [
             { role: "system", content: REPORT_PROMPT },
-            { 
-                role: "user", 
-                content: `请根据以下VOC数据生成分析报告。
+            {
+                role: "user",
+                content: `请根据以下VOC数据生成完整的分析报告：
 
 ## 数据摘要
 - 数据总量：${summary.totalCount} 条
 - 时间范围：${summary.dateRange.start} 至 ${summary.dateRange.end}
 - 国家分布：${JSON.stringify(summary.countryStats)}
-- 问题分类：${JSON.stringify(summary.categoryStats)}
+- 问题分类统计：${JSON.stringify(summary.categoryStats)}
 - 风险分布：${JSON.stringify(summary.riskStats)}
 
-## 具体问题列表（按风险排序）
+## 具体问题（按风险降序，最多50条）
 ${JSON.stringify(summary.topIssues, null, 2)}
 
-请生成分析报告：`
+请严格按照要求输出 Markdown 报告：`
             }
-        ],
-        model: "deepseek-chat",
-        temperature: 0.2,
-        max_tokens: 3000
+        ]
     });
 
-    let report = completion.choices[0].message.content;
-    
-    // 在报告末尾添加元信息
+    // 记录费用
+    if (completion.usage) {
+        await recordAICost('qwen', 'qwen3-max', 'report', completion.usage);
+    }
+
+    let report = completion.choices[0].message.content.trim();
+
     const currentDate = getCurrentDate();
-    report += `\n\n---\n*报告生成时间：${currentDate}*`;
+    report += `\n\n---\n*报告生成时间：${currentDate} | 模型：通义千问 qwen3-max*`;
 
     return {
         success: true,
         report,
         meta: {
             totalAnalyzed: reportData.length,
-            generatedAt: new Date().toISOString()
+            generatedAt: new Date().toISOString(),
+            model: 'qwen3-max',
+            usage: completion.usage
         }
     };
 }

@@ -103,15 +103,15 @@ router.post('/report/generate-all', async (req, res) => {
  * GET /api/reports
  * 【新】获取报告存档列表
  */
-router.get('/reports', (req, res) => {
+router.get('/reports', async (req, res) => {
   try {
     const { appId, limit = 50 } = req.query;
     
     let reports;
     if (appId) {
-      reports = getReportsByApp(appId, parseInt(limit));
+      reports = await getReportsByApp(appId, parseInt(limit));
     } else {
-      reports = getAllReports(parseInt(limit));
+      reports = await getAllReports(parseInt(limit));
     }
     
     res.json({ success: true, data: reports });
@@ -125,10 +125,10 @@ router.get('/reports', (req, res) => {
  * GET /api/reports/:id
  * 【新】获取单个报告详情
  */
-router.get('/reports/:id', (req, res) => {
+router.get('/reports/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const report = getReportById(parseInt(id));
+    const report = await getReportById(parseInt(id));
     
     if (!report) {
       return res.status(404).json({ error: 'Report not found' });
@@ -145,7 +145,7 @@ router.get('/reports/:id', (req, res) => {
  * GET /api/apps
  * 【新】获取所有App列表
  */
-router.get('/apps', (req, res) => {
+router.get('/apps', async (req, res) => {
   try {
     // 先从数据中获取所有App
     const data = loadAllReports();
@@ -159,9 +159,9 @@ router.get('/apps', (req, res) => {
     }));
     
     // 同步到数据库
-    apps.forEach(app => {
-      upsertAppConfig(app.appId, app.appName, app.country);
-    });
+    for (const app of apps) {
+      await upsertAppConfig(app.appId, app.appName, app.country);
+    }
     
     res.json({ success: true, data: apps });
   } catch (e) {

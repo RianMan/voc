@@ -23,7 +23,17 @@ export const CostOverview: React.FC = () => {
       .then(res => res.json())
       .then(res => {
         console.log(res,'rere');
-        if (res.success) setStats(res.data);
+        if (res.success) {
+          setStats({
+              total: Number(res.data.total),
+              weekly: Number(res.data.weekly),
+              breakdown: res.data.breakdown.map(b => ({
+                ...b,
+                cost: Number(b.cost),
+                tokens: Number(b.tokens)
+              }))
+            })
+        }
       })
       .catch(console.error)
       .finally(() => setLoading(false));

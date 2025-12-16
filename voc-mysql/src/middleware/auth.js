@@ -33,8 +33,8 @@ export function destroySession(token) {
   sessions.delete(token);
 }
 
-// 认证中间件
-export function authMiddleware(req, res, next) {
+// 认证中间件（异步版本）
+export async function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
   
   if (!token) {
@@ -46,13 +46,18 @@ export function authMiddleware(req, res, next) {
     return res.status(401).json({ error: '登录已过期' });
   }
   
-  const user = getUserById(session.userId);
-  if (!user || !user.is_active) {
-    return res.status(401).json({ error: '用户不存在或已禁用' });
+  try {
+    const user = await getUserById(session.userId);
+    if (!user || !user.is_active) {
+      return res.status(401).json({ error: '用户不存在或已禁用' });
+    }
+    
+    req.user = user;
+    next();
+  } catch (e) {
+    console.error('[Auth] Error:', e);
+    return res.status(500).json({ error: '认证失败' });
   }
-  
-  req.user = user;
-  next();
 }
 
 // 角色检查中间件
@@ -71,15 +76,19 @@ export function requireRole(...roles) {
 }
 
 // 可选认证（不强制登录，但如果有token就解析用户）
-export function optionalAuth(req, res, next) {
+export async function optionalAuth(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
   
   if (token) {
     const session = getSession(token);
     if (session) {
-      const user = getUserById(session.userId);
-      if (user && user.is_active) {
-        req.user = user;
+      try {
+        const user = await getUserById(session.userId);
+        if (user && user.is_active) {
+          req.user = user;
+        }
+      } catch (e) {
+        // 忽略错误，继续处理
       }
     }
   }

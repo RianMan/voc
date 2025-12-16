@@ -5,15 +5,9 @@ import {
   getLastReport, 
   ACTIVE_STATUSES,
   getStatusBatch,
-  recordAICost
+  recordAICost,
+  getWeeklyStatusLogs
 } from '../db.js';
-import Database from 'better-sqlite3';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, '../../data/voc.db');
-const db = new Database(DB_PATH);
 
 let client = null;
 
@@ -48,29 +42,6 @@ function getCurrentDate() {
     month: 'long',
     day: 'numeric'
   });
-}
-
-// 获取本周的操作记录
-function getWeeklyStatusLogs(reviewIds, daysBack = 7) {
-  if (!reviewIds || reviewIds.length === 0) return [];
-  
-  const placeholders = reviewIds.map(() => '?').join(',');
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - daysBack);
-  const cutoffStr = cutoffDate.toISOString();
-  
-  const stmt = db.prepare(`
-    SELECT 
-      sl.*,
-      rs.status as current_status
-    FROM status_logs sl
-    LEFT JOIN review_status rs ON sl.review_id = rs.review_id
-    WHERE sl.review_id IN (${placeholders})
-      AND sl.created_at >= ?
-    ORDER BY sl.created_at DESC
-  `);
-  
-  return stmt.all(...reviewIds, cutoffStr);
 }
 
 // 按操作人汇总处理记录
@@ -144,7 +115,7 @@ const REPORT_PROMPT = `你是一个专业的金融科技产品运营专家。你
 
 ### 6. 总结与行动计划
 - **紧急阻断**：针对合规风险的措施。
-- **产品/体验优化**：基于上面的“归因”和“建议”，制定本周的产品优化计划（例如：优化下单页UI、修改短信文案）。
+- **产品/体验优化**：基于上面的"归因"和"建议"，制定本周的产品优化计划（例如：优化下单页UI、修改短信文案）。
 `;
 
 /**
@@ -168,9 +139,9 @@ export function groupDataByApp(data) {
 }
 
 /**
- * 准备单个App的报告数据
+ * 准备单个App的报告数据（异步版本）
  */
-function prepareAppReportData(items, lastReport) {
+async function prepareAppReportData(items, lastReport) {
   const now = new Date();
   const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
@@ -239,9 +210,9 @@ function prepareAppReportData(items, lastReport) {
       suggestedReply: item.suggested_reply || "Please contact support."
     }));
 
-  // 获取本周操作记录
+  // 获取本周操作记录（异步）
   const allIds = items.map(i => i.id);
-  const weeklyLogs = getWeeklyStatusLogs(allIds, 7);
+  const weeklyLogs = await getWeeklyStatusLogs(allIds, 7);
   const operatorSummary = summarizeByOperator(weeklyLogs);
 
   // 本周解决的问题详情
@@ -291,11 +262,9 @@ function prepareAppReportData(items, lastReport) {
       category: i.category
     })),
     comparison,
-    // 处理记录
     operatorSummary,
     resolvedThisWeek: resolvedThisWeek.slice(0, 20),
     weeklyLogsCount: weeklyLogs.length,
-    // 用于存档
     allActiveItems: activeItems.slice(0, 50).map(i => ({
       id: i.id,
       summary: i.summary,
@@ -307,16 +276,16 @@ function prepareAppReportData(items, lastReport) {
 }
 
 /**
- * 为单个App生成报告
+ * 为单个App生成报告（异步版本）
  */
 export async function generateAppReport(appId, appName, items, options = {}, user = null) {
   const { save = true } = options;
   
   // 获取上期报告用于对比
-  const lastReport = getLastReport(appId);
+  const lastReport = await getLastReport(appId);
   
   // 准备数据
-  const reportData = prepareAppReportData(items, lastReport);
+  const reportData = await prepareAppReportData(items, lastReport);
   
   if (reportData.totalActive === 0 && reportData.resolvedThisWeekCount === 0) {
     return {
@@ -361,7 +330,7 @@ export async function generateAppReport(appId, appName, items, options = {}, use
   const filteredCategoryStats = { ...reportData.categoryStats };
   delete filteredCategoryStats['Positive'];
   delete filteredCategoryStats['Other'];
-  delete filteredCategoryStats['positive']; // 防御大小写
+  delete filteredCategoryStats['positive'];
   delete filteredCategoryStats['other'];
 
   const userPrompt = `请为 **${appName}** 生成 ${year}年 第 ${weekNum} 周的VOC分析周报。
@@ -403,7 +372,7 @@ export async function generateAppReport(appId, appName, items, options = {}, use
   });
 
   if (completion.usage) {
-      recordAICost(provider, model, 'report', completion.usage);
+      await recordAICost(provider, model, 'report', completion.usage);
   }
 
   let report = completion.choices[0].message.content.trim();
@@ -416,14 +385,13 @@ export async function generateAppReport(appId, appName, items, options = {}, use
   
   // 添加元信息
   const currentDate = getCurrentDate();
-  // 优先取 display_name (数据库字段), 其次 username, 再次 name (JWT常用), 最后 fallback
   const generatorName = user?.display_name || user?.username || user?.name || '管理员'; 
   
   report += `\n\n---\n*报告生成时间：${currentDate} | 生成人：${generatorName}*`;
 
   // 保存到数据库
   if (save) {
-    saveReport({
+    await saveReport({
       appId,
       appName,
       reportType: 'weekly',
@@ -465,7 +433,7 @@ export async function generateAllAppReports(user = null) {
   
   // 获取状态
   const allIds = data.map(d => d.id).filter(Boolean);
-  const statusMap = getStatusBatch(allIds);
+  const statusMap = await getStatusBatch(allIds);
   data = data.map(item => ({
     ...item,
     status: statusMap[item.id]?.status || 'pending'
@@ -510,7 +478,7 @@ export async function generateReportForApp(appId, filters = {}, limit = 200, use
 
   // 获取状态
   const allIds = data.map(d => d.id).filter(Boolean);
-  const statusMap = getStatusBatch(allIds);
+  const statusMap = await getStatusBatch(allIds);
   data = data.map(item => ({
     ...item,
     status: statusMap[item.id]?.status || 'pending'

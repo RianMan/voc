@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, '../data');
 
 // ==========================================
-// 1. 配置应用列表（支持同一国家多个包）
+// 配置应用列表
 // ==========================================
 const APPS = [
     { country: 'pk', lang: 'ur', appId: 'com.creditcat.tech.app', appName: 'SmartQarza' },
@@ -16,7 +16,6 @@ const APPS = [
     { country: 'id', lang: 'id', appId: 'com.pinjamwinwin', appName: 'Pinjamin' },
     { country: 'th', lang: 'th', appId: 'com.thai.credit.finance.reliable.loan.android', appName: 'EASY สินเชื่อ' }
 ];
-
 
 const FETCH_CONFIG = {
     sort: gplay.sort.NEWEST,
@@ -30,7 +29,7 @@ function ensureDir(dirPath) {
     }
 }
 
-// 生成安全的文件名（处理包名中的特殊字符）
+// 生成安全的文件名
 function sanitizeFilename(appId) {
     return appId.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
@@ -58,7 +57,6 @@ async function fetchReviews(target) {
 
         console.log(`✅ 成功抓取 ${enrichedReviews.length} 条评论`);
 
-        // 新结构: data/{country}/raw_reviews_{appId}.json
         const countryDir = path.join(DATA_DIR, target.country);
         ensureDir(countryDir);
         

@@ -46,7 +46,6 @@ function scanRawFiles(dir) {
         const fullPath = path.join(dir, entry.name);
         
         if (entry.isDirectory()) {
-            // 递归扫描子目录
             results.push(...scanRawFiles(fullPath));
         } else if (entry.isFile() && entry.name.startsWith('raw_reviews_') && entry.name.endsWith('.json')) {
             results.push(fullPath);
@@ -57,7 +56,6 @@ function scanRawFiles(dir) {
 }
 
 async function analyzeFile(rawFilePath) {
-    // 输出文件放在同目录: raw_reviews_xxx.json -> analyzed_xxx.json
     const dir = path.dirname(rawFilePath);
     const basename = path.basename(rawFilePath);
     const outputFilename = basename.replace('raw_reviews_', 'analyzed_');
@@ -98,7 +96,7 @@ async function analyzeBatch(reviews) {
     const payload = reviews.map(r => ({ 
         id: r.id, 
         text: r.text,
-        score: r.score // 传入评分
+        score: r.score
     }));
 
     const userPrompt = `
@@ -110,12 +108,12 @@ async function analyzeBatch(reviews) {
     "risk_level" (High/Medium/Low),
     "translated_text" (翻译成通顺的简体中文),
     
-    // 新增：深度分析字段
+    // 深度分析字段
     "root_cause": (中文，深度归因。分析用户为什么会遇到这个问题？例如：下单按钮文案有歧义、防诈骗提示不明显、催收话术过激),
-    "action_advice": (中文，行动建议。针对产品或运营的具体优化策略。例如：建议将“申请”按钮改为“确认提现”、增加二次确认弹窗、核查代理商ID),
+    "action_advice": (中文，行动建议。针对产品或运营的具体优化策略。例如：建议将"申请"按钮改为"确认提现"、增加二次确认弹窗、核查代理商ID),
     
-    // 新增：高情商回复
-    "suggested_reply": (当地语言回复。要求：1. 极度共情，像真人一样对话；2. 必须引用用户提到的具体细节（如“360天”、“800额度”）；3. 严禁使用“We sincerely apologize”等机械套话，直接说人话；4. 给出具体指引。)
+    // 高情商回复
+    "suggested_reply": (当地语言回复。要求：1. 极度共情，像真人一样对话；2. 必须引用用户提到的具体细节（如"360天"、"800额度"）；3. 严禁使用"We sincerely apologize"等机械套话，直接说人话；4. 给出具体指引。)
 
     评论数据:
     ${JSON.stringify(payload)}
@@ -133,7 +131,7 @@ async function analyzeBatch(reviews) {
         });
 
         if (completion.usage) {
-            const cost = recordAICost('deepseek', 'deepseek-chat', 'analysis', completion.usage);
+            const cost = await recordAICost('deepseek', 'deepseek-chat', 'analysis', completion.usage);
             console.log(`   💰 本批次花费: ¥${cost.toFixed(4)}`);
         }
 
@@ -160,7 +158,7 @@ async function analyzeBatch(reviews) {
                 appId: original?.appId || "Unknown",
                 appName: original?.appName || "",
                 version: original?.version || "Unknown",
-                replyText: original?.replyText || null, // GP 上已有的回复
+                replyText: original?.replyText || null,
                 replyDate: original?.replyDate || null
             };
         });

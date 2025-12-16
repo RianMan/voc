@@ -20,7 +20,7 @@ const router = Router();
  * POST /api/auth/login
  * 用户登录
  */
-router.post('/auth/login', (req, res) => {
+router.post('/auth/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     
@@ -28,7 +28,7 @@ router.post('/auth/login', (req, res) => {
       return res.status(400).json({ error: '请输入用户名和密码' });
     }
     
-    const user = authenticateUser(username, password);
+    const user = await authenticateUser(username, password);
     
     if (!user) {
       return res.status(401).json({ error: '用户名或密码错误' });
@@ -84,7 +84,7 @@ router.get('/auth/me', authMiddleware, (req, res) => {
  * PUT /api/auth/password
  * 修改密码
  */
-router.put('/auth/password', authMiddleware, (req, res) => {
+router.put('/auth/password', authMiddleware, async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
     
@@ -93,13 +93,13 @@ router.put('/auth/password', authMiddleware, (req, res) => {
     }
     
     // 验证原密码
-    const user = authenticateUser(req.user.username, oldPassword);
+    const user = await authenticateUser(req.user.username, oldPassword);
     if (!user) {
       return res.status(400).json({ error: '原密码错误' });
     }
     
     // 更新密码
-    updateUser(req.user.id, { password: newPassword });
+    await updateUser(req.user.id, { password: newPassword });
     
     res.json({ success: true });
   } catch (e) {
@@ -114,9 +114,9 @@ router.put('/auth/password', authMiddleware, (req, res) => {
  * GET /api/users
  * 获取用户列表
  */
-router.get('/users', authMiddleware, requireRole('admin'), (req, res) => {
+router.get('/users', authMiddleware, requireRole('admin'), async (req, res) => {
   try {
-    const users = getAllUsers();
+    const users = await getAllUsers();
     res.json({ success: true, data: users });
   } catch (e) {
     console.error('[Users] Get list failed:', e);
@@ -128,7 +128,7 @@ router.get('/users', authMiddleware, requireRole('admin'), (req, res) => {
  * POST /api/users
  * 创建用户
  */
-router.post('/users', authMiddleware, requireRole('admin'), (req, res) => {
+router.post('/users', authMiddleware, requireRole('admin'), async (req, res) => {
   try {
     const { username, password, displayName, role } = req.body;
     
@@ -140,7 +140,7 @@ router.post('/users', authMiddleware, requireRole('admin'), (req, res) => {
       return res.status(400).json({ error: '无效的角色' });
     }
     
-    const result = createUser(username, password, displayName || username, role || 'operator');
+    const result = await createUser(username, password, displayName || username, role || 'operator');
     
     if (!result.success) {
       return res.status(400).json({ error: result.error });
@@ -157,7 +157,7 @@ router.post('/users', authMiddleware, requireRole('admin'), (req, res) => {
  * PUT /api/users/:id
  * 更新用户
  */
-router.put('/users/:id', authMiddleware, requireRole('admin'), (req, res) => {
+router.put('/users/:id', authMiddleware, requireRole('admin'), async (req, res) => {
   try {
     const { id } = req.params;
     const { displayName, role, isActive, password } = req.body;
@@ -167,7 +167,7 @@ router.put('/users/:id', authMiddleware, requireRole('admin'), (req, res) => {
       return res.status(400).json({ error: '不能修改自己的角色' });
     }
     
-    const result = updateUser(parseInt(id), { displayName, role, isActive, password });
+    const result = await updateUser(parseInt(id), { displayName, role, isActive, password });
     res.json(result);
   } catch (e) {
     console.error('[Users] Update failed:', e);
@@ -179,7 +179,7 @@ router.put('/users/:id', authMiddleware, requireRole('admin'), (req, res) => {
  * DELETE /api/users/:id
  * 删除用户（软删除）
  */
-router.delete('/users/:id', authMiddleware, requireRole('admin'), (req, res) => {
+router.delete('/users/:id', authMiddleware, requireRole('admin'), async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -188,7 +188,7 @@ router.delete('/users/:id', authMiddleware, requireRole('admin'), (req, res) => 
       return res.status(400).json({ error: '不能删除自己' });
     }
     
-    deleteUser(parseInt(id));
+    await deleteUser(parseInt(id));
     res.json({ success: true });
   } catch (e) {
     console.error('[Users] Delete failed:', e);

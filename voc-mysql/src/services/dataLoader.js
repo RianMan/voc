@@ -72,19 +72,19 @@ export function loadAllReports() {
 }
 
 /**
- * 加载数据并合并状态
+ * 加载数据并合并状态（异步版本）
  */
-export function loadDataWithStatus() {
+export async function loadDataWithStatus() {
     let data = loadAllReports();
     
     // 初始化状态
     const allIds = data.map(d => d.id).filter(Boolean);
     if (allIds.length > 0) {
-        initStatusBatch(allIds);
+        await initStatusBatch(allIds);
     }
 
     // 合并状态到数据
-    const statusMap = getStatusBatch(allIds);
+    const statusMap = await getStatusBatch(allIds);
     data = data.map(item => ({
         ...item,
         status: statusMap[item.id]?.status || 'pending',
@@ -156,18 +156,15 @@ export function filterData(data, filters) {
         });
     }
 
-    // ✅ 新的逻辑：先状态分层，再日期排序
+    // 排序：先状态分层，再日期排序
     filteredData.sort((a, b) => {
-        // 1. 定义哪些状态属于“已结束/非活跃”（需要沉底）
         const isFinishedA = ['resolved', 'irrelevant'].includes(a.status);
         const isFinishedB = ['resolved', 'irrelevant'].includes(b.status);
 
-        // 2. 如果状态性质不同（一个活跃、一个已结束），则活跃的排在前面
         if (isFinishedA !== isFinishedB) {
-            return isFinishedA ? 1 : -1; // A是结束态 -> A放后面(1); A是活跃态 -> A放前面(-1)
+            return isFinishedA ? 1 : -1;
         }
 
-        // 3. 如果状态性质相同（都是活跃，或者都是已结束），则按日期倒序（新的在前）
         return new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime();
     });
 
