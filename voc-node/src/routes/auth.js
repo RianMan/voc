@@ -1,198 +1,71 @@
-import { Router } from 'express';
-import { 
-  authenticateUser, 
-  createUser, 
-  getAllUsers, 
-  updateUser, 
-  deleteUser,
-  getUserById 
-} from '../db.js';
-import { 
-  createSession, 
-  destroySession, 
-  authMiddleware, 
-  requireRole 
-} from '../middleware/auth.js';
+import express from 'express';
+import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import prisma from '../lib/prisma.js';
 
-const router = Router();
+const router = express.Router();
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
-/**
- * POST /api/auth/login
- * 用户登录
- */
-router.post('/auth/login', (req, res) => {
+// 密码哈希工具 (简单版，生产环境建议用 bcrypt)
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+// 登录
+router.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+
   try {
-    const { username, password } = req.body;
-    
-    if (!username || !password) {
-      return res.status(400).json({ error: '请输入用户名和密码' });
-    }
-    
-    const user = authenticateUser(username, password);
-    
-    if (!user) {
+    const user = await prisma.user.findUnique({
+      where: { username }
+    });
+
+    if (!user || user.passwordHash !== hashPassword(password)) {
       return res.status(401).json({ error: '用户名或密码错误' });
     }
-    
-    const token = createSession(user);
-    
-    res.json({
-      success: true,
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        displayName: user.display_name,
-        role: user.role
-      }
+
+    // 更新最后登录时间
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLogin: new Date() }
     });
-  } catch (e) {
-    console.error('[Auth] Login failed:', e);
+
+    const token = jwt.sign(
+      { userId: user.id, username: user.username, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({ 
+      token, 
+      user: { 
+        id: user.id, 
+        username: user.username, 
+        role: user.role 
+      } 
+    });
+  } catch (error) {
     res.status(500).json({ error: '登录失败' });
   }
 });
 
-/**
- * POST /api/auth/logout
- * 退出登录
- */
-router.post('/auth/logout', (req, res) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (token) {
-    destroySession(token);
-  }
-  res.json({ success: true });
-});
-
-/**
- * GET /api/auth/me
- * 获取当前用户信息
- */
-router.get('/auth/me', authMiddleware, (req, res) => {
-  res.json({
-    success: true,
-    user: {
-      id: req.user.id,
-      username: req.user.username,
-      displayName: req.user.display_name,
-      role: req.user.role
-    }
-  });
-});
-
-/**
- * PUT /api/auth/password
- * 修改密码
- */
-router.put('/auth/password', authMiddleware, (req, res) => {
+// 注册初始管理员 (仅供测试用)
+router.post('/init-admin', async (req, res) => {
   try {
-    const { oldPassword, newPassword } = req.body;
-    
-    if (!oldPassword || !newPassword) {
-      return res.status(400).json({ error: '请输入原密码和新密码' });
-    }
-    
-    // 验证原密码
-    const user = authenticateUser(req.user.username, oldPassword);
-    if (!user) {
-      return res.status(400).json({ error: '原密码错误' });
-    }
-    
-    // 更新密码
-    updateUser(req.user.id, { password: newPassword });
-    
-    res.json({ success: true });
-  } catch (e) {
-    console.error('[Auth] Change password failed:', e);
-    res.status(500).json({ error: '修改密码失败' });
-  }
-});
+    const count = await prisma.user.count();
+    if (count > 0) return res.status(403).json({ error: '系统已初始化' });
 
-// ==================== 用户管理（仅管理员） ====================
-
-/**
- * GET /api/users
- * 获取用户列表
- */
-router.get('/users', authMiddleware, requireRole('admin'), (req, res) => {
-  try {
-    const users = getAllUsers();
-    res.json({ success: true, data: users });
+    const admin = await prisma.user.create({
+      data: {
+        username: 'admin',
+        passwordHash: hashPassword('admin123'),
+        displayName: '系统管理员',
+        role: 'admin'
+      }
+    });
+    res.json({ success: true, user: admin });
   } catch (e) {
-    console.error('[Users] Get list failed:', e);
-    res.status(500).json({ error: '获取用户列表失败' });
-  }
-});
-
-/**
- * POST /api/users
- * 创建用户
- */
-router.post('/users', authMiddleware, requireRole('admin'), (req, res) => {
-  try {
-    const { username, password, displayName, role } = req.body;
-    
-    if (!username || !password) {
-      return res.status(400).json({ error: '用户名和密码必填' });
-    }
-    
-    if (role && !['admin', 'operator', 'viewer'].includes(role)) {
-      return res.status(400).json({ error: '无效的角色' });
-    }
-    
-    const result = createUser(username, password, displayName || username, role || 'operator');
-    
-    if (!result.success) {
-      return res.status(400).json({ error: result.error });
-    }
-    
-    res.json({ success: true, id: result.id });
-  } catch (e) {
-    console.error('[Users] Create failed:', e);
-    res.status(500).json({ error: '创建用户失败' });
-  }
-});
-
-/**
- * PUT /api/users/:id
- * 更新用户
- */
-router.put('/users/:id', authMiddleware, requireRole('admin'), (req, res) => {
-  try {
-    const { id } = req.params;
-    const { displayName, role, isActive, password } = req.body;
-    
-    // 不能修改自己的角色
-    if (parseInt(id) === req.user.id && role && role !== req.user.role) {
-      return res.status(400).json({ error: '不能修改自己的角色' });
-    }
-    
-    const result = updateUser(parseInt(id), { displayName, role, isActive, password });
-    res.json(result);
-  } catch (e) {
-    console.error('[Users] Update failed:', e);
-    res.status(500).json({ error: '更新用户失败' });
-  }
-});
-
-/**
- * DELETE /api/users/:id
- * 删除用户（软删除）
- */
-router.delete('/users/:id', authMiddleware, requireRole('admin'), (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    // 不能删除自己
-    if (parseInt(id) === req.user.id) {
-      return res.status(400).json({ error: '不能删除自己' });
-    }
-    
-    deleteUser(parseInt(id));
-    res.json({ success: true });
-  } catch (e) {
-    console.error('[Users] Delete failed:', e);
-    res.status(500).json({ error: '删除用户失败' });
+    res.status(500).json({ error: e.message });
   }
 });
 

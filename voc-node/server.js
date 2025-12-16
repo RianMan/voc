@@ -1,27 +1,43 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import routes from './src/routes/index.js';
+
+// 路由
+import authRoutes from './src/routes/auth.js';
+import vocRoutes from './src/routes/voc.js';
+import statusRoutes from './src/routes/status.js';
+// import reportRoutes from './src/routes/report.js'; // 暂时先注释，稍后修复
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
-// Routes
-app.use('/api', routes);
+// API Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/voc', vocRoutes);       // 现在连接的是 MySQL
+app.use('/api/status', statusRoutes); // 现在连接的是 MySQL
+// app.use('/api/report', reportRoutes);
 
-// Error handler
-app.use((err, req, res, next) => {
-    console.error('Server Error:', err);
-    res.status(500).json({ error: 'Internal server error', message: err.message });
+// Health Check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', db: 'mysql' });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 VOC Server running at http://localhost:${PORT}`);
+// React Fallback
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📡 API endpoints ready (MySQL backed)`);
 });

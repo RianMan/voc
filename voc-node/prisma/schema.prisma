@@ -1,0 +1,122 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int          @id @default(autoincrement())
+  username     String       @unique
+  passwordHash String
+  displayName  String?
+  role         String       @default("operator")
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  lastLogin    DateTime?
+  statusLogs   StatusLog[]
+  notes        ReviewNote[]
+  createdTopics TopicConfig[]
+}
+
+model AppConfig {
+  appId       String   @id
+  appName     String
+  country     String
+  isActive    Boolean  @default(true)
+  feedbacks   Feedback[]
+}
+
+model Feedback {
+  id              String         @id @default(uuid())
+  appId           String
+  source          FeedbackSource
+  externalId      String?
+  originalTime    DateTime
+  content         String         @db.Text
+  metaData        Json?
+  category        String?
+  riskLevel       String?
+  summary         String?        @db.VarChar(500)
+  translatedText  String?        @db.Text
+  rootCause       String?        @db.Text
+  actionAdvice    String?        @db.Text
+  suggestedReply  String?        @db.Text
+  status          ReviewStatus   @default(PENDING)
+  assigneeId      Int?
+  statusNote      String?        @db.Text
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  app             AppConfig      @relation(fields: [appId], references: [appId])
+  statusLogs      StatusLog[]
+  notes           ReviewNote[]
+  @@unique([source, externalId])
+  @@index([appId, source, originalTime])
+  @@index([category, riskLevel])
+}
+
+model TopicConfig {
+  id           Int      @id @default(autoincrement())
+  name         String
+  keywords     Json
+  scopeCountry String?
+  scopeAppId   String?
+  isActive     Boolean  @default(true)
+  createdById  Int
+  createdAt    DateTime @default(now())
+  creator      User     @relation(fields: [createdById], references: [id])
+}
+
+model StatusLog {
+  id         Int          @id @default(autoincrement())
+  feedbackId String
+  oldStatus  ReviewStatus?
+  newStatus  ReviewStatus
+  userId     Int?
+  userName   String?
+  note       String?
+  createdAt  DateTime     @default(now())
+  feedback   Feedback     @relation(fields: [feedbackId], references: [id])
+  user       User?        @relation(fields: [userId], references: [id])
+}
+
+model ReviewNote {
+  id         Int      @id @default(autoincrement())
+  feedbackId String
+  userId     Int
+  userName   String?
+  content    String   @db.Text
+  createdAt  DateTime @default(now())
+  feedback   Feedback @relation(fields: [feedbackId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model AiCost {
+  id             Int      @id @default(autoincrement())
+  provider       String
+  model          String
+  operationType  String
+  inputTokens    Int
+  outputTokens   Int
+  totalCost      Float
+  createdAt      DateTime @default(now())
+}
+
+enum FeedbackSource {
+  GOOGLE_PLAY
+  APP_STORE
+  UDESK_CHAT
+  CALL_TRANSCRIPT
+  EMAIL
+}
+
+enum ReviewStatus {
+  PENDING
+  IRRELEVANT
+  CONFIRMED
+  REPORTED
+  IN_PROGRESS
+  RESOLVED
+}
