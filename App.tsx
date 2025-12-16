@@ -9,6 +9,9 @@ import { CostOverview } from './pages/CostOverview';
 import { LoginPage } from './pages/LoginPage';
 import { fetchVocData } from './services/api';
 import { VOCItem } from './types';
+import { TopicManager } from './pages/TopicManager';
+import { ClusterAnalysis } from './pages/ClusterAnalysis';
+import { VerificationTracker } from './pages/VerificationTracker';
 import { Loader2, RefreshCw } from 'lucide-react';
 
 const MainApp: React.FC = () => {
@@ -86,6 +89,12 @@ const MainApp: React.FC = () => {
         return <CostOverview />;
       case 'users':
         return <UserManagement />;
+      case 'topics':
+        return <TopicManager />;
+      case 'clusters':
+        return <ClusterAnalysis />;
+      case 'verification':
+        return <VerificationTracker />;
       case 'settings':
         return (
           <div className="bg-white rounded-xl border border-slate-200 p-8">

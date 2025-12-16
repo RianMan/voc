@@ -3,6 +3,7 @@ import vocRoutes from './voc.js';
 import statusRoutes from './status.js';
 import reportRoutes from './report.js';
 import authRoutes from './auth.js';
+import advancedRoutes from './advancedRoutes.js';
 
 const router = Router();
 
@@ -11,5 +12,6 @@ router.use(authRoutes);
 router.use(vocRoutes);
 router.use(statusRoutes);
 router.use(reportRoutes);
+router.use(advancedRoutes);  // 高级功能路由
 
 export default router;

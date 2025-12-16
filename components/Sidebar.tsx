@@ -2,7 +2,7 @@ import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   LayoutDashboard, Table2, Settings, FileText, Archive, Users, LogOut, Shield, Settings2, Eye,
-  Coins
+  Coins, Tag, Layers, Target
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -17,6 +17,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView })
     { id: 'dashboard', label: '概览', icon: LayoutDashboard, roles: ['admin', 'operator', 'viewer'] },
     { id: 'reports', label: '问题处理', icon: Table2, roles: ['admin', 'operator', 'viewer'] },
     { id: 'archive', label: '报告存档', icon: Archive, roles: ['admin', 'operator', 'viewer'] },
+    
+    // === 高级功能 ===
+    { id: 'divider1', label: '高级功能', divider: true },
+    { id: 'topics', label: '专题管理', icon: Tag, roles: ['admin', 'operator'] },
+    { id: 'clusters', label: '聚类分析', icon: Layers, roles: ['admin', 'operator', 'viewer'] },
+    { id: 'verification', label: '闭环验证', icon: Target, roles: ['admin', 'operator'] },
+    
+    // === 系统管理 ===
+    { id: 'divider2', label: '系统管理', divider: true },
     { id: 'costs', label: 'AI 费用统计', icon: Coins, roles: ['admin'] },
     { id: 'users', label: '用户管理', icon: Users, roles: ['admin'] },
     { id: 'settings', label: '设置', icon: Settings, roles: ['admin'] },
@@ -24,7 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView })
 
   // 根据用户角色过滤菜单
   const visibleMenuItems = menuItems.filter(item => 
-    item.roles.includes(user?.role || 'viewer')
+    item.divider || item.roles?.includes(user?.role || 'viewer')
   );
 
   const getRoleIcon = () => {
@@ -57,9 +66,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView })
         </div>
       </div>
       
-      <nav className="flex-1 p-4 space-y-2">
+      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         {visibleMenuItems.map((item) => {
-          const Icon = item.icon;
+          // 分隔符渲染
+          if (item.divider) {
+            return (
+              <div key={item.id} className="pt-4 pb-2">
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider px-4">
+                  {item.label}
+                </p>
+              </div>
+            );
+          }
+          
+          const Icon = item.icon!;
           const isActive = currentView === item.id;
           return (
             <button

@@ -235,3 +235,271 @@ export async function fetchReportDetail(id: number): Promise<{ success: boolean;
   if (!res.ok) throw new Error('Get report detail failed');
   return res.json();
 }
+
+
+// services/api.ts 新增部分 - 追加到现有api.ts文件末尾
+
+// ==================== 专题管理 API ====================
+
+export interface TopicConfig {
+  id: number;
+  name: string;
+  description?: string;
+  keywords: string[];
+  scope: 'global' | 'country' | 'app';
+  country?: string;
+  app_id?: string;
+  is_active: boolean;
+  start_date?: string;
+  end_date?: string;
+  created_at: string;
+}
+
+export interface TopicAnalysis {
+  id: number;
+  topic_id: number;
+  analysis_date: string;
+  total_matches: number;
+  sentiment_positive: number;
+  sentiment_negative: number;
+  sentiment_neutral: number;
+  ai_summary: string;
+  pain_points: string[];
+  recommendations: string[];
+}
+
+export const fetchTopics = async (filters?: {
+  scope?: string;
+  country?: string;
+  appId?: string;
+  isActive?: boolean;
+}) => {
+  const params = new URLSearchParams();
+  if (filters?.scope) params.append('scope', filters.scope);
+  if (filters?.country) params.append('country', filters.country);
+  if (filters?.appId) params.append('appId', filters.appId);
+  if (filters?.isActive !== undefined) params.append('isActive', String(filters.isActive));
+  
+  const res = await fetch(`${API_BASE}/topics?${params}`);
+  return res.json();
+};
+
+export const createTopic = async (data: Partial<TopicConfig>) => {
+  const res = await fetch(`${API_BASE}/topics`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+};
+
+export const updateTopic = async (id: number, data: Partial<TopicConfig>) => {
+  const res = await fetch(`${API_BASE}/topics/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+};
+
+export const deleteTopic = async (id: number) => {
+  const res = await fetch(`${API_BASE}/topics/${id}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders()
+  });
+  return res.json();
+};
+
+export const scanTopics = async (appId?: string, limit = 500) => {
+  const res = await fetch(`${API_BASE}/topics/scan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ appId, limit })
+  });
+  return res.json();
+};
+
+export const analyzeTopic = async (topicId: number) => {
+  const res = await fetch(`${API_BASE}/topics/${topicId}/analyze`, {
+    method: 'POST',
+    headers: getAuthHeaders()
+  });
+  return res.json();
+};
+
+export const fetchTopicHistory = async (topicId: number) => {
+  const res = await fetch(`${API_BASE}/topics/${topicId}/history`);
+  return res.json();
+};
+
+// ==================== 聚类分析 API ====================
+
+export interface IssueCluster {
+  id: number;
+  app_id: string;
+  category: string;
+  week_number: number;
+  year: number;
+  cluster_title: string;
+  cluster_rank: number;
+  review_count: number;
+  percentage: number;
+  root_cause_summary: string;
+  action_suggestion: string;
+  sample_reviews: string[];
+}
+
+export const fetchClusters = async (filters?: {
+  appId?: string;
+  category?: string;
+  weekNumber?: number;
+  year?: number;
+}) => {
+  const params = new URLSearchParams();
+  if (filters?.appId) params.append('appId', filters.appId);
+  if (filters?.category) params.append('category', filters.category);
+  if (filters?.weekNumber) params.append('weekNumber', String(filters.weekNumber));
+  if (filters?.year) params.append('year', String(filters.year));
+  
+  const res = await fetch(`${API_BASE}/clusters?${params}`);
+  return res.json();
+};
+
+export const runClustering = async (appId: string, category: string) => {
+  const res = await fetch(`${API_BASE}/clusters/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ appId, category })
+  });
+  return res.json();
+};
+
+export const runWeeklyClustering = async () => {
+  const res = await fetch(`${API_BASE}/clusters/run-weekly`, {
+    method: 'POST',
+    headers: getAuthHeaders()
+  });
+  return res.json();
+};
+
+export const fetchClusterSummary = async (appId: string) => {
+  const res = await fetch(`${API_BASE}/clusters/summary/${appId}`);
+  return res.json();
+};
+
+// ==================== 闭环验证 API ====================
+
+export interface VerificationConfig {
+  id: number;
+  app_id: string;
+  issue_type: 'category' | 'cluster' | 'keyword';
+  issue_value: string;
+  baseline_start: string;
+  baseline_end: string;
+  verify_start: string;
+  verify_end?: string;
+  optimization_desc: string;
+  expected_reduction?: number;
+  status: 'monitoring' | 'resolved' | 'worsened' | 'no_change';
+  created_at: string;
+}
+
+export interface VerificationResult {
+  id: number;
+  config_id: number;
+  verify_date: string;
+  baseline_count: number;
+  baseline_total: number;
+  verify_count: number;
+  verify_total: number;
+  change_percent: number;
+  conclusion: string;
+}
+
+export const fetchVerifications = async (filters?: { appId?: string; status?: string }) => {
+  const params = new URLSearchParams();
+  if (filters?.appId) params.append('appId', filters.appId);
+  if (filters?.status) params.append('status', filters.status);
+  
+  const res = await fetch(`${API_BASE}/verifications?${params}`);
+  return res.json();
+};
+
+export const createVerification = async (data: Partial<VerificationConfig>) => {
+  const res = await fetch(`${API_BASE}/verifications`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+};
+
+export const quickCreateVerification = async (data: {
+  appId: string;
+  issueType: string;
+  issueValue: string;
+  optimizationDate: string;
+  optimizationDesc: string;
+}) => {
+  const res = await fetch(`${API_BASE}/verifications/quick`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+};
+
+export const runVerification = async (configId: number) => {
+  const res = await fetch(`${API_BASE}/verifications/${configId}/run`, {
+    method: 'POST',
+    headers: getAuthHeaders()
+  });
+  return res.json();
+};
+
+export const runAllVerifications = async () => {
+  const res = await fetch(`${API_BASE}/verifications/run-all`, {
+    method: 'POST',
+    headers: getAuthHeaders()
+  });
+  return res.json();
+};
+
+export const fetchVerificationHistory = async (configId: number) => {
+  const res = await fetch(`${API_BASE}/verifications/${configId}/history`);
+  return res.json();
+};
+
+export const fetchVerificationSummary = async (appId: string) => {
+  const res = await fetch(`${API_BASE}/verifications/summary/${appId}`);
+  return res.json();
+};
+
+// ==================== 增强周报 API ====================
+
+export const generateWeeklyReport = async (appId: string) => {
+  const res = await fetch(`${API_BASE}/weekly-report/generate/${appId}`, {
+    method: 'POST',
+    headers: getAuthHeaders()
+  });
+  return res.json();
+};
+
+export const generateAllWeeklyReports = async () => {
+  const res = await fetch(`${API_BASE}/weekly-report/generate-all`, {
+    method: 'POST',
+    headers: getAuthHeaders()
+  });
+  return res.json();
+};
+
+export const fetchStructuredReport = async (appId: string) => {
+  const res = await fetch(`${API_BASE}/weekly-report/structured/${appId}`);
+  return res.json();
+};
+
+// Helper
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('voc_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
