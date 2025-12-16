@@ -161,16 +161,31 @@ ${JSON.stringify(inputData, null, 2)}
  * 执行聚类分析并保存结果
  */
 export async function runClusteringForApp(appId, category, options = {}) {
-  const { weekNumber, year } = options.weekNumber 
-    ? options 
-    : getWeekInfo();
-  
-  const { start, end } = getWeekDateRange(weekNumber, year);
-  
-  console.log(`[Cluster] 开始聚类: ${appId} / ${category} / ${year}W${weekNumber}`);
-  
-  // 获取本周该分类的评论
-  const reviews = await getWeeklyReviewsByCategory(appId, category, weekNumber, year);
+  let weekNumber, year, start, end;
+  console.log(options.startDate, 'options.startDate');
+  console.log(options.endDate, 'options.endDate');
+
+  if (options.startDate && options.endDate) {
+    start = new Date(options.startDate);
+    end = new Date(options.endDate);
+    end.setHours(23, 59, 59, 999);
+    // 可选：计算对应周号（用于保存）
+    const info = getWeekInfo(start);
+    weekNumber = info.weekNumber;
+    year = info.year;
+  } else {
+    ({ weekNumber, year } = options.weekNumber ? options : getWeekInfo());
+    ({ start, end } = getWeekDateRange(weekNumber, year));
+  }
+
+  console.log(`[Cluster] 开始聚类: ${appId} / ${category} / ${start.toISOString().split('T')[0]} ~ ${end.toISOString().split('T')[0]}`);
+
+  const allData = loadAllReports();
+  const reviews = allData.filter(item => {
+    if (item.appId !== appId || item.category !== category) return false;
+    const itemDate = new Date(item.date);
+    return itemDate >= start && itemDate <= end;
+  });
   
   if (reviews.length < 3) {
     console.log(`[Cluster] 评论数不足(${reviews.length})，跳过聚类`);

@@ -160,13 +160,10 @@ router.get('/clusters', async (req, res) => {
  */
 router.post('/clusters/run', authMiddleware, requireRole('admin', 'operator'), async (req, res) => {
   try {
-    const { appId, category } = req.body;
-    
-    if (!appId || !category) {
-      return res.status(400).json({ error: 'appId 和 category 必填' });
-    }
-    
-    const result = await ClusterService.runClusteringForApp(appId, category);
+    const { appId, category, startDate, endDate } = req.body;
+    if (!appId || !category) return res.status(400).json({ error: 'appId 和 category 必填' });
+
+    const result = await ClusterService.runClusteringForApp(appId, category, { startDate, endDate });
     res.json(result);
   } catch (e) {
     console.error('[Clusters] Run failed:', e);

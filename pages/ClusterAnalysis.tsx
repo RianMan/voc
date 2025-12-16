@@ -24,6 +24,9 @@ export const ClusterAnalysis: React.FC = () => {
   const [runningAll, setRunningAll] = useState(false);
   const [expandedCluster, setExpandedCluster] = useState<number | null>(null);
 
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
   useEffect(() => {
     loadApps();
   }, []);
@@ -61,7 +64,7 @@ export const ClusterAnalysis: React.FC = () => {
     if (!selectedApp) return;
     setRunning(true);
     try {
-      const result = await runClustering(selectedApp, selectedCategory);
+      const result = await runClustering(selectedApp, selectedCategory, startDate, endDate);
       if (result.success) {
         alert(`聚类完成！分析 ${result.totalAnalyzed} 条，生成 ${result.clustersCreated} 个聚类`);
         loadClusters();
@@ -164,6 +167,18 @@ export const ClusterAnalysis: React.FC = () => {
               {cat.label}
             </button>
           ))}
+        </div>
+
+        <div className="flex gap-4 items-end">
+          <div>
+            <label className="block text-sm text-slate-600 mb-1">开始日期</label>
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-2 border rounded-lg" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-600 mb-1">结束日期</label>
+            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-2 border rounded-lg" />
+          </div>
+          <button onClick={() => { setStartDate(''); setEndDate(''); }} className="text-sm text-blue-600">清除</button>
         </div>
       </div>
 

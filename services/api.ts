@@ -365,11 +365,11 @@ export const fetchClusters = async (filters?: {
   return res.json();
 };
 
-export const runClustering = async (appId: string, category: string) => {
+export const runClustering = async (appId: string, category: string, startDate?: string, endDate?: string) => {
   const res = await fetch(`${API_BASE}/clusters/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-    body: JSON.stringify({ appId, category })
+    body: JSON.stringify({ appId, category, startDate, endDate })
   });
   return res.json();
 };
