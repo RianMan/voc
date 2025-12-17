@@ -148,7 +148,8 @@ router.get('/reports/:id', async (req, res) => {
 router.get('/apps', async (req, res) => {
   try {
     // 先从数据中获取所有App
-    const data = loadAllReports();
+    const result = await loadAllReports();
+    const data = result.data;
     const groups = groupDataByApp(data);
     
     const apps = Object.values(groups).map(g => ({

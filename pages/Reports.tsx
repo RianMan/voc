@@ -12,7 +12,7 @@ import { RiskBadge } from '../components/RiskBadge';
 import { NoteModal } from '../components/NoteModal';
 import { 
   Search, ChevronLeft, ChevronRight, Calendar, Loader2, FileText, 
-  CheckSquare, X, Copy, Download, Archive, ChevronDown, ChevronUp,
+  CheckSquare, X, Copy, ExternalLink, Archive, ChevronDown, ChevronUp,
   Check, Ban, Send, Clock, CheckCircle, Loader, CheckCircle2, MessageSquare
 } from 'lucide-react';
 
@@ -584,6 +584,18 @@ export const Reports: React.FC = () => {
                             maxLength={60}
                             className="text-slate-400"
                           />
+                          {item.source === 'google_play' && item.sourceUrl && (
+                              <a 
+                                href={item.sourceUrl} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center text-blue-400 hover:text-blue-600 hover:underline shrink-0"
+                                title="前往 Google Play 查看"
+                              >
+                                <ExternalLink size={12} className="mr-0.5" />
+                                <span className="text-[10px]">GP原文</span>
+                              </a>
+                            )}
                         </div>
                       </div>
                     </td>

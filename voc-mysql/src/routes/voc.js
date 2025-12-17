@@ -11,16 +11,14 @@ const router = Router();
 router.get('/voc-data', async (req, res) => {
     try {
         const { page = 1, limit = 10, ...filters } = req.query;
-        let data = await loadDataWithStatus();
-        data = filterData(data, filters);
-        const result = paginate(data, page, limit);
+        // 直接调用 filterData，传入筛选条件和分页参数
+        const result = await filterData(filters, page, limit);
         res.json(result);
     } catch (e) {
         console.error('[VOC] Get data failed:', e);
         res.status(500).json({ error: 'Get data failed' });
     }
 });
-
 // ==================== 备注与历史相关接口 ====================
 
 /**

@@ -45,7 +45,8 @@ async function collectReportData(appId) {
   const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   
   // 1. 加载基础数据
-  let allData = loadAllReports().filter(item => item.appId === appId);
+  const result = await loadAllReports();
+  let allData = result.data.filter(item => item.appId === appId);
   const allIds = allData.map(d => d.id).filter(Boolean);
   const statusMap = await getStatusBatch(allIds);
   
@@ -144,7 +145,8 @@ async function collectReportData(appId) {
  */
 export async function generateStructuredReport(appId, user = null) {
   const data = await collectReportData(appId);
-  const appInfo = loadAllReports().find(d => d.appId === appId);
+  const result = await loadAllReports();
+  const appInfo = result.data.find(d => d.appId === appId);
   const appName = appInfo?.appName || appId;
   
   // 构建结构化报告
@@ -290,7 +292,8 @@ ${JSON.stringify(structuredData, null, 2)}
  * 定时任务入口：生成所有 App 的周报
  */
 export async function generateAllWeeklyReports(user = null) {
-  const allData = loadAllReports();
+  const result = await loadAllReports();
+  const allData = result.data;
   const appIds = [...new Set(allData.map(d => d.appId).filter(Boolean))];
   
   const results = [];

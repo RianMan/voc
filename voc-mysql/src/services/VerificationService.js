@@ -18,25 +18,31 @@ import { loadAllReports } from './dataLoader.js';
  */
 export async function createVerificationConfig(data) {
   const {
-    appId,
-    issueType,        // 'category' | 'cluster' | 'keyword'
-    issueValue,       // 分类名/聚类ID/关键词
-    baselineStart,
-    baselineEnd,
-    verifyStart,
-    verifyEnd,
-    optimizationDesc,
-    expectedReduction,
-    createdBy
+    app_id: appId,
+    issue_type: issueType,
+    issue_value: issueValue,
+    baseline_start: baselineStart,
+    baseline_end: baselineEnd,
+    verify_start: verifyStart,
+    verify_end: verifyEnd,
+    optimization_desc: optimizationDesc = '',
+    expected_reduction: expectedReduction,
+    created_by: createdBy
   } = data;
-  
+
+  const finalExpectedReduction = expectedReduction ?? null;
+  const finalVerifyEnd = verifyEnd ?? null;
+  const finalCreatedBy = createdBy ?? null;
+
+  console.log(data, 'datadata', finalExpectedReduction);
+
   const [result] = await pool.execute(
     `INSERT INTO verification_configs 
      (app_id, issue_type, issue_value, baseline_start, baseline_end, 
       verify_start, verify_end, optimization_desc, expected_reduction, created_by)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [appId, issueType, issueValue, baselineStart, baselineEnd, 
-     verifyStart, verifyEnd || null, optimizationDesc, expectedReduction || null, createdBy || null]
+     verifyStart, finalVerifyEnd, optimizationDesc, finalExpectedReduction, finalCreatedBy]
   );
   
   return { success: true, id: result.insertId };
@@ -81,7 +87,8 @@ export async function updateVerificationStatus(id, status) {
 async function countReviews(options) {
   const { appId, issueType, issueValue, startDate, endDate } = options;
   
-  const allData = loadAllReports();
+  const result = await loadAllReports();
+  const allData = result.data;
   
   // 筛选时间范围和App
   let filtered = allData.filter(item => {
@@ -341,15 +348,15 @@ export async function quickCreateVerification(data) {
   const verifyStart = new Date(optDate);
   
   return createVerificationConfig({
-    appId,
-    issueType,
-    issueValue,
-    baselineStart: baselineStart.toISOString().split('T')[0],
-    baselineEnd: baselineEnd.toISOString().split('T')[0],
-    verifyStart: verifyStart.toISOString().split('T')[0],
-    verifyEnd: null, // 持续监控
-    optimizationDesc,
-    createdBy
+    app_id: appId,
+    issue_type: issueType,
+    issue_value: issueValue,
+    baseline_start: baselineStart.toISOString().split('T')[0],
+    baseline_end: baselineEnd.toISOString().split('T')[0],
+    verify_start: verifyStart.toISOString().split('T')[0],
+    verify_end: null,
+    optimization_desc: optimizationDesc ?? '',
+    created_by: createdBy
   });
 }
 

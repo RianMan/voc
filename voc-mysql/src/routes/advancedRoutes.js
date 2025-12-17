@@ -86,7 +86,10 @@ router.post('/topics/scan', authMiddleware, requireRole('admin', 'operator'), as
   try {
     const { appId, limit = 500 } = req.body;
     
-    let reviews = await loadDataWithStatus();
+    const response = await loadDataWithStatus();
+    
+    // 2. 提取数据数组 [修改点]
+    let reviews = response.data || [];
     if (appId) {
       reviews = reviews.filter(r => r.appId === appId);
     }
@@ -108,7 +111,7 @@ router.post('/topics/:id/analyze', authMiddleware, async (req, res) => {
   try {
     const topicId = parseInt(req.params.id);
     const reviews = await TopicService.getTopicMatchedReviews(topicId, req.body);
-    
+    console.log(reviews, typeof reviews);
     if (reviews.length === 0) {
       return res.json({ success: true, message: '无匹配评论' });
     }

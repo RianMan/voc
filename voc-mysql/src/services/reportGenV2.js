@@ -429,7 +429,8 @@ export async function generateAppReport(appId, appName, items, options = {}, use
  * 为所有App批量生成报告
  */
 export async function generateAllAppReports(user = null) {
-  let data = loadAllReports();
+  const result = await loadAllReports();
+  let data = result.data;
   
   // 获取状态
   const allIds = data.map(d => d.id).filter(Boolean);
@@ -464,7 +465,8 @@ export async function generateAllAppReports(user = null) {
  * 为指定App生成报告（供API调用）
  */
 export async function generateReportForApp(appId, filters = {}, limit = 200, user = null) {
-  let data = loadAllReports();
+  const result = await loadAllReports();
+  let data = result.data;
   
   // 筛选指定App
   data = data.filter(item => item.appId === appId);

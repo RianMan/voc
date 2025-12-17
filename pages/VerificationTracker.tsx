@@ -90,6 +90,7 @@ export const VerificationTracker: React.FC = () => {
           baseline_start: form.baselineStart,
           baseline_end: form.baselineEnd,
           verify_start: form.verifyStart,
+          verify_end: null,
           optimization_desc: form.optimizationDesc,
           expected_reduction: form.expectedReduction ? parseFloat(form.expectedReduction) : undefined
         });
@@ -145,6 +146,8 @@ export const VerificationTracker: React.FC = () => {
   const getStatusConfig = (status: string) => {
     return STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.monitoring;
   };
+
+  
 
   return (
     <div className="space-y-6">
@@ -442,7 +445,7 @@ export const VerificationTracker: React.FC = () => {
                 <div className="space-y-3">
                   {showHistoryModal.history.map(result => {
                     const statusCfg = getStatusConfig(result.conclusion);
-                    
+                    const changeVal = Number(result.change_percent); // 强制转为数字
                     return (
                       <div key={result.id} className="border border-slate-200 rounded-lg p-4">
                         <div className="flex items-center justify-between mb-3">
@@ -464,8 +467,8 @@ export const VerificationTracker: React.FC = () => {
                         </div>
                         
                         <div className="mt-3 text-center">
-                          <span className={`text-lg font-bold ${result.change_percent < 0 ? 'text-green-600' : result.change_percent > 0 ? 'text-red-600' : 'text-slate-600'}`}>
-                            {result.change_percent > 0 ? '+' : ''}{result.change_percent?.toFixed(1)}%
+                          <span className={`text-lg font-bold ${changeVal < 0 ? 'text-green-600' : changeVal > 0 ? 'text-red-600' : 'text-slate-600'}`}>
+                            {changeVal > 0 ? '+' : ''}{changeVal?.toFixed(1)}%
                           </span>
                         </div>
                       </div>

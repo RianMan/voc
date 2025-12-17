@@ -114,9 +114,12 @@ function prepareReportSummary(data) {
 }
 
 export async function generateReportWithQW(filters = {}, limit = 100) {
-    let data = loadAllReports();
+    const result = await loadAllReports();
+    let data = result.data;
+    
     filters.reportMode = true;
-    data = filterData(data, filters);
+    const filtered = await filterData(filters);
+    data = filtered.data;
 
     const reportData = data.slice(0, limit);
 

@@ -45,6 +45,7 @@ export interface VOCItem {
   date: string;
   country: string;
   source: string;
+  sourceUrl?: string;
   appId: string;
   appName?: string;
   version: string;

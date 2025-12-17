@@ -67,7 +67,8 @@ export async function getWeeklyReviewsByCategory(appId, category, weekNumber, ye
   const { start, end } = getWeekDateRange(weekNumber, year);
   
   // 从内存数据中筛选
-  const allData = loadAllReports();
+  const result = await loadAllReports();
+  const allData = result.data;
   
   return allData.filter(item => {
     if (item.appId !== appId) return false;
@@ -180,7 +181,8 @@ export async function runClusteringForApp(appId, category, options = {}) {
 
   console.log(`[Cluster] 开始聚类: ${appId} / ${category} / ${start.toISOString().split('T')[0]} ~ ${end.toISOString().split('T')[0]}`);
 
-  const allData = loadAllReports();
+  const result = await loadAllReports();
+  const allData = result.data;
   const reviews = allData.filter(item => {
     if (item.appId !== appId || item.category !== category) return false;
     const itemDate = new Date(item.date);
@@ -259,7 +261,8 @@ export async function runWeeklyClustering() {
   const { weekNumber, year } = getWeekInfo();
   
   // 获取所有 App
-  const allData = loadAllReports();
+  const result = await loadAllReports();
+  const allData = result.data;
   const appIds = [...new Set(allData.map(d => d.appId).filter(Boolean))];
   
   const results = [];
