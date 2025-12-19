@@ -33,7 +33,10 @@ function getAIClient() {
  */
 export async function createTopic(data) {
   const { name, description, keywords, scope, country, appId, startDate, endDate, createdBy } = data;
-  
+   // appId 必填
+  if (!appId) {
+    throw new Error('必须选择App');
+  }
   // 校验作用域
   if (scope === 'country' && !country) {
     throw new Error('scope=country 时必须指定 country');
@@ -160,18 +163,17 @@ export async function scanReviewForTopics(review) {
   const matches = [];
   
   for (const topic of topics) {
-    const keywords = topic.keywords || [];
-    const matchedKeywords = keywords.filter(kw => translated_text.includes(kw));
-    
-    if (matchedKeywords.length > 0) {
+    // const keywords = topic.keywords || [];
+    const aiResult = await matchReviewWithAI(review, topic);
+    if (aiResult.isMatch && aiResult.confidence > 0.7) { 
       matches.push({
         topicId: topic.id,
         topicName: topic.name,
         reviewId: id,
         appId,
         country,
-        matchedKeywords,
-        matchedText: extractMatchContext(translated_text, matchedKeywords[0])
+        matchedKeywords: [aiResult.reason],
+        matchedText: extractMatchContext(translated_text, topic.keywords[0] || '')
       });
     }
   }
@@ -199,40 +201,29 @@ function extractMatchContext(text, keyword, contextLength = 50) {
  */
 export async function batchScanReviews(reviews) {
   const stats = { scanned: 0, matched: 0, saved: 0 };
-  const conn = await pool.getConnection();
   
-  try {
-    await conn.beginTransaction();
-    
-    for (const review of reviews) {
-      stats.scanned++;
+  for (const review of reviews) {
+    stats.scanned++;
+    try {
       const matches = await scanReviewForTopics(review);
       
       for (const match of matches) {
         stats.matched++;
-        try {
-          await conn.execute(
-            `INSERT INTO topic_matches 
-             (topic_id, review_id, app_id, country, matched_keywords, matched_text)
-             VALUES (?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE matched_keywords = VALUES(matched_keywords)`,
-            [match.topicId, match.reviewId, match.appId, match.country,
-             JSON.stringify(match.matchedKeywords), match.matchedText]
-          );
-          stats.saved++;
-        } catch (e) {
-          // 忽略重复键错误
-          if (e.code !== 'ER_DUP_ENTRY') throw e;
-        }
+        // 每条单独插入，不用事务
+        await pool.execute(
+          `INSERT INTO topic_matches 
+           (topic_id, review_id, app_id, country, matched_keywords, matched_text)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE matched_keywords = VALUES(matched_keywords)`,
+          [match.topicId, match.reviewId, match.appId, match.country,
+           JSON.stringify(match.matchedKeywords), match.matchedText]
+        );
+        stats.saved++;
       }
+    } catch (e) {
+      console.error(`[Topics] Review ${review.id} 处理失败:`, e.message);
+      // 继续处理下一条，不中断
     }
-    
-    await conn.commit();
-  } catch (e) {
-    await conn.rollback();
-    throw e;
-  } finally {
-    conn.release();
   }
   
   return stats;
@@ -364,6 +355,39 @@ export async function getTopicAnalysisHistory(topicId, limit = 10) {
     pain_points: typeof row.pain_points === 'string' ? JSON.parse(row.pain_points) : row.pain_points,
     recommendations: typeof row.recommendations === 'string' ? JSON.parse(row.recommendations) : row.recommendations
   }));
+}
+
+async function matchReviewWithAI(review, topic) {
+  const client = getAIClient();
+  const model = process.env.TONGYI_API_KEY ? 'qwen-plus' : 'deepseek-chat';
+  
+  const prompt = `判断这条用户评论是否与专题相关。
+
+专题名称：${topic.name}
+专题描述：${topic.description || '无'}
+参考关键词：${topic.keywords.join(', ')}
+
+用户评论：${review.translated_text || review.text}
+
+请返回JSON：
+{
+  "isMatch": true或false,
+  "confidence": 0-1的置信度,
+  "reason": "简短理由"
+}`;
+
+  const completion = await client.chat.completions.create({
+    model,
+    max_tokens: 200,
+    temperature: 0.1,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: '你是VOC分析专家，判断评论是否与指定专题相关。' },
+      { role: 'user', content: prompt }
+    ]
+  });
+
+  return JSON.parse(completion.choices[0].message.content);
 }
 
 export default {

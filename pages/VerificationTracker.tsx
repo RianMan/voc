@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   fetchVerifications, createVerification, quickCreateVerification,
   runVerification, runAllVerifications, fetchVerificationHistory,
-  fetchApps, VerificationConfig, VerificationResult, AppInfo
+  fetchApps, VerificationConfig, VerificationResult, AppInfo, IssueCluster,fetchClusters
 } from '../services/api';
 import { 
   CheckCircle2, XCircle, Minus, TrendingDown, TrendingUp,
@@ -25,6 +25,7 @@ export const VerificationTracker: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState<number | null>(null);
   const [runningAll, setRunningAll] = useState(false);
+  const [clusters, setClusters] = useState<IssueCluster[]>([]);
   
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -47,6 +48,14 @@ export const VerificationTracker: React.FC = () => {
   useEffect(() => {
     loadApps();
   }, []);
+
+  useEffect(() => {
+    if (form.issueType === 'cluster' && form.appId) {
+      fetchClusters({ appId: form.appId }).then(res => {
+        setClusters(res.data || []);
+      });
+    }
+  }, [form.appId, form.issueType]);
 
   useEffect(() => {
     loadVerifications();
@@ -342,13 +351,28 @@ export const VerificationTracker: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">目标值</label>
-                  <input
-                    type="text"
-                    value={form.issueValue}
-                    onChange={(e) => setForm({ ...form, issueValue: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg"
-                    placeholder={form.issueType === 'category' ? 'Tech_Bug' : form.issueType === 'keyword' ? '短信验证码' : '聚类ID'}
-                  />
+                  {form.issueType === 'cluster' ? (
+                    <select
+                      value={form.issueValue}
+                      onChange={(e) => setForm({ ...form, issueValue: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg"
+                    >
+                      <option value="">选择聚类</option>
+                      {clusters.map(cluster => (
+                        <option key={cluster.id} value={cluster.id}>
+                          #{cluster.id} - {cluster.cluster_title} ({cluster.category}, {cluster.review_count}条)
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={form.issueValue}
+                      onChange={(e) => setForm({ ...form, issueValue: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg"
+                      placeholder={form.issueType === 'category' ? 'Tech_Bug' : '短信验证码'}
+                    />
+                  )}
                 </div>
               </div>
 

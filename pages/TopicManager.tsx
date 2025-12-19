@@ -17,8 +17,9 @@ export const TopicManager: React.FC = () => {
   const [analyzing, setAnalyzing] = useState<number | null>(null);
   
   // 筛选
-  const [filterScope, setFilterScope] = useState<string>('');
   const [filterApp, setFilterApp] = useState<string>('');
+  const [scanStartDate, setScanStartDate] = useState<string>('');
+  const [scanEndDate, setScanEndDate] = useState<string>(''); 
   
   // 弹窗
   const [showModal, setShowModal] = useState(false);
@@ -37,17 +38,23 @@ export const TopicManager: React.FC = () => {
 
   useEffect(() => {
     loadData();
-  }, [filterScope, filterApp]);
+  }, [filterApp]);
 
   const loadData = async () => {
     setLoading(true);
     try {
       const [topicsRes, appsRes] = await Promise.all([
-        fetchTopics({ scope: filterScope || undefined, appId: filterApp || undefined }),
+        fetchTopics({ appId: filterApp || undefined }),
         fetchApps()
       ]);
       setTopics(topicsRes.data || []);
-      setApps(appsRes.data || []);
+      const appList = appsRes.data || [];
+      setApps(appList);
+      
+      // 自动选中第一个App
+      if (!filterApp && appList.length > 0) {
+        setFilterApp(appList[0].appId);
+      }
     } catch (e) {
       console.error('Load failed', e);
     } finally {
@@ -57,7 +64,14 @@ export const TopicManager: React.FC = () => {
 
   const handleCreate = () => {
     setEditingTopic(null);
-    setForm({ name: '', description: '', keywords: '', scope: 'global', country: '', appId: '' });
+      setForm({ 
+        name: '', 
+        description: '', 
+        keywords: '', 
+        scope: 'app',  // 固定为 app
+        country: '', 
+        appId: filterApp  // 默认当前选中的App
+      });
     setShowModal(true);
   };
 
@@ -104,9 +118,13 @@ export const TopicManager: React.FC = () => {
   };
 
   const handleScan = async () => {
+    if (!filterApp) {
+      alert('请先选择App');
+      return;
+    }
     setScanning(true);
     try {
-      const result = await scanTopics(filterApp || undefined);
+      const result = await scanTopics(filterApp);  // 传 appId
       alert(`扫描完成！扫描 ${result.scanned} 条，匹配 ${result.matched} 条`);
       loadData();
     } catch (e) {
@@ -170,27 +188,30 @@ export const TopicManager: React.FC = () => {
       </div>
 
       {/* Filters */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 flex gap-4">
-        <select
-          value={filterScope}
-          onChange={(e) => setFilterScope(e.target.value)}
-          className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
-        >
-          <option value="">所有作用域</option>
-          <option value="global">全局</option>
-          <option value="country">国家级</option>
-          <option value="app">App级</option>
-        </select>
+      <div className="bg-white p-4 rounded-xl border border-slate-200 flex gap-4 items-center">
         <select
           value={filterApp}
           onChange={(e) => setFilterApp(e.target.value)}
           className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
         >
-          <option value="">所有App</option>
           {apps.map(app => (
             <option key={app.appId} value={app.appId}>{app.appName}</option>
           ))}
         </select>
+        
+        <input
+          type="date"
+          value={scanStartDate}
+          onChange={(e) => setScanStartDate(e.target.value)}
+          className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
+        />
+        <span className="text-slate-400">至</span>
+        <input
+          type="date"
+          value={scanEndDate}
+          onChange={(e) => setScanEndDate(e.target.value)}
+          className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
+        />
       </div>
 
       {/* Topic List */}
@@ -309,50 +330,15 @@ export const TopicManager: React.FC = () => {
                 />
               </div>
               
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">作用域</label>
-                <select
-                  value={form.scope}
-                  onChange={(e) => setForm({ ...form, scope: e.target.value as any })}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg"
-                >
-                  <option value="global">全局（所有App）</option>
-                  <option value="country">国家级</option>
-                  <option value="app">App级</option>
-                </select>
-              </div>
-              
-              {form.scope !== 'global' && (
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">国家</label>
-                  <select
-                    value={form.country}
-                    onChange={(e) => setForm({ ...form, country: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg"
-                  >
-                    <option value="">选择国家</option>
-                    <option value="PK">Pakistan</option>
-                    <option value="MX">Mexico</option>
-                    <option value="PH">Philippines</option>
-                    <option value="ID">Indonesia</option>
-                    <option value="TH">Thailand</option>
-                  </select>
-                </div>
-              )}
-              
               {form.scope === 'app' && (
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">App</label>
-                  <select
-                    value={form.appId}
-                    onChange={(e) => setForm({ ...form, appId: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg"
-                  >
-                    <option value="">选择App</option>
-                    {apps.map(app => (
-                      <option key={app.appId} value={app.appId}>{app.appName}</option>
-                    ))}
-                  </select>
+                  <input
+                    type="text"
+                    value={apps.find(a => a.appId === form.appId)?.appName || form.appId}
+                    disabled
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50"
+                  />
                 </div>
               )}
             </div>
@@ -393,8 +379,15 @@ export const TopicManager: React.FC = () => {
                 showAnalysis.history.map(analysis => (
                   <div key={analysis.id} className="border border-slate-200 rounded-lg p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-sm font-medium text-slate-800">{analysis.analysis_date}</span>
-                      <span className="text-xs text-slate-500">匹配 {analysis.total_matches} 条</span>
+                      <div>
+                        <span className="text-sm font-medium text-slate-800">
+                          {analysis.period_start} ~ {analysis.period_end}
+                        </span>
+                        <span className="text-xs text-slate-500 ml-2">
+                          (样本: {analysis.total_matches} 条)
+                        </span>
+                      </div>
+                      <span className="text-xs text-slate-400">{analysis.analysis_date}</span>
                     </div>
                     
                     <div className="flex gap-4 mb-3 text-sm">

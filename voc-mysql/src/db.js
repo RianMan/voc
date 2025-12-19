@@ -208,7 +208,7 @@ export const ACTIVE_STATUSES = ['pending', 'confirmed', 'reported', 'in_progress
 // ==================== 评论状态操作 ====================
 export async function getStatus(reviewId) {
   const [rows] = await pool.execute(
-    'SELECT * FROM review_status WHERE review_id = ?',
+    'SELECT id, external_id as review_id, status, note, updated_at, assignee as updated_by FROM voc_feedbacks WHERE external_id = ?',
     [reviewId]
   );
   return rows[0] || null;
@@ -219,7 +219,8 @@ export async function getStatusBatch(reviewIds) {
   
   const placeholders = reviewIds.map(() => '?').join(',');
   const [rows] = await pool.execute(
-    `SELECT review_id, status, note, updated_at, updated_by FROM review_status WHERE review_id IN (${placeholders})`,
+    `SELECT external_id as review_id, status, note, updated_at, assignee as updated_by 
+     FROM voc_feedbacks WHERE external_id IN (${placeholders})`,
     reviewIds
   );
   
@@ -237,26 +238,24 @@ export async function updateStatus(reviewId, newStatus, user = null, note = '', 
   const userId = user?.id || null;
   const userName = user?.display_name || user?.username || 'system';
   
+  // 更新 voc_feedbacks 表
   await pool.execute(
-    `INSERT INTO review_status (review_id, source, status, note, updated_by, updated_at)
-     VALUES (?, ?, ?, ?, ?, NOW())
-     ON DUPLICATE KEY UPDATE
-       status = VALUES(status),
-       note = VALUES(note),
-       updated_by = VALUES(updated_by),
-       updated_at = NOW()`,
-    [reviewId, source, newStatus, note, userId]
+    `UPDATE voc_feedbacks SET status = ?, note = ?, assignee = ?, updated_at = NOW()
+     WHERE external_id = ?`,
+    [newStatus, note, userName, reviewId]
   );
   
-  await pool.execute(
-    `INSERT INTO status_logs (review_id, old_status, new_status, user_id, user_name, note)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [reviewId, oldStatus, newStatus, userId, userName, note]
-  );
+  // 记录日志（需要用 voc_feedbacks.id）
+  if (existing?.id) {
+    await pool.execute(
+      `INSERT INTO status_logs (review_id, old_status, new_status, user_id, user_name, note)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [existing.id, oldStatus, newStatus, userId, userName, note]
+    );
+  }
   
   return { reviewId, oldStatus, newStatus, updatedBy: userName };
 }
-
 export async function initStatusBatch(reviewIds, source = 'google_play') {
   if (!reviewIds || reviewIds.length === 0) return 0;
   
@@ -415,9 +414,9 @@ export async function getWeeklyStatusLogs(reviewIds, daysBack = 7) {
   const [rows] = await pool.execute(
     `SELECT 
       sl.*,
-      rs.status as current_status
+      vf.status as current_status
     FROM status_logs sl
-    LEFT JOIN review_status rs ON sl.review_id = rs.review_id
+    LEFT JOIN voc_feedbacks vf ON sl.review_id = vf.id
     WHERE sl.review_id IN (${placeholders})
       AND sl.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
     ORDER BY sl.created_at DESC`,

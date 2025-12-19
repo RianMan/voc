@@ -11,7 +11,8 @@ import TopicService from '../services/TopicService.js';
 import ClusterService from '../services/ClusterService.js';
 import VerificationService from '../services/VerificationService.js';
 import WeeklyReportService from '../services/WeeklyReportService.js';
-import { loadDataWithStatus } from '../services/dataLoader.js';
+import { loadDataWithStatus, filterData } from '../services/dataLoader.js';
+import { format } from 'date-fns';
 
 const router = Router();
 
@@ -84,16 +85,20 @@ router.delete('/topics/:id', authMiddleware, requireRole('admin'), async (req, r
  */
 router.post('/topics/scan', authMiddleware, requireRole('admin', 'operator'), async (req, res) => {
   try {
-    const { appId, limit = 500 } = req.body;
+    const { appId, startDate, endDate, limit = 500 } = req.body;
     
-    const response = await loadDataWithStatus();
-    
-    // 2. 提取数据数组 [修改点]
-    let reviews = response.data || [];
-    if (appId) {
-      reviews = reviews.filter(r => r.appId === appId);
+    // appId 必传
+    if (!appId) {
+      return res.status(400).json({ error: 'appId 必填' });
     }
-    reviews = reviews.slice(0, parseInt(limit));
+    
+    const response = await filterData({
+      appId,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined
+    }, 1, parseInt(limit));
+    
+    let reviews = response.data || [];
     
     const result = await TopicService.batchScanReviews(reviews);
     res.json({ success: true, ...result });
@@ -131,7 +136,14 @@ router.post('/topics/:id/analyze', authMiddleware, async (req, res) => {
 router.get('/topics/:id/history', async (req, res) => {
   try {
     const history = await TopicService.getTopicAnalysisHistory(req.params.id);
-    res.json({ success: true, data: history });
+    const formatted = history.map(item => ({
+      ...item,
+      period_start: format(new Date(item.period_start), 'yyyy-MM-dd HH:mm:ss'),
+      period_end: format(new Date(item.period_end), 'yyyy-MM-dd HH:mm:ss'),
+      analysis_date: format(new Date(item.analysis_date), 'yyyy-MM-dd HH:mm:ss')
+    }));
+    
+    res.json({ success: true, data: formatted });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

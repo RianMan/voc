@@ -263,6 +263,8 @@ export interface TopicAnalysis {
   sentiment_positive: number;
   sentiment_negative: number;
   sentiment_neutral: number;
+  period_start: string,
+  period_end: string,
   ai_summary: string;
   pain_points: string[];
   recommendations: string[];
@@ -310,11 +312,11 @@ export const deleteTopic = async (id: number) => {
   return res.json();
 };
 
-export const scanTopics = async (appId?: string, limit = 500) => {
+export const scanTopics = async (appId: String, startDate?: string, endDate?: string) => {
   const res = await fetch(`${API_BASE}/topics/scan`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-    body: JSON.stringify({ appId, limit })
+    body: JSON.stringify({ appId, startDate, endDate })
   });
   return res.json();
 };
