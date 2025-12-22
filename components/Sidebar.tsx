@@ -28,6 +28,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView })
     { id: 'divider2', label: '系统管理', divider: true },
     { id: 'costs', label: 'AI 费用统计', icon: Coins, roles: ['admin'] },
     { id: 'users', label: '用户管理', icon: Users, roles: ['admin'] },
+    { id: 'help', label: '使用帮助', icon: Users, roles: ['admin', 'operator', 'viewer'] },
     { id: 'settings', label: '设置', icon: Settings, roles: ['admin'] },
   ];
 
