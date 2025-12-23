@@ -8,8 +8,8 @@
  * 3. AI 专项分析
  */
 
-import pool from '../db.js';
-import { recordAICost } from '../db.js';
+import pool from '../db/index.js';
+import { recordAICost } from '../db/index.js';
 import OpenAI from 'openai';
 
 // AI 客户端（延迟初始化）

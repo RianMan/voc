@@ -1,4 +1,4 @@
-import pool from '../db.js';
+import pool from '../db/index.js';
 
 /**
  * 加载所有分析报告 (从 MySQL 读取)

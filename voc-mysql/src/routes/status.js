@@ -8,7 +8,7 @@ import {
     getNotesCount,
     STATUS,
     STATUS_LABELS 
-} from '../db.js';
+} from '../db/index.js';
 import { authMiddleware, requireRole, optionalAuth } from '../middleware/auth.js';
 
 const router = Router();

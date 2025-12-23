@@ -6,7 +6,7 @@ import {
   updateUser, 
   deleteUser,
   getUserById 
-} from '../db.js';
+} from '../db/index.js';
 import { 
   createSession, 
   destroySession, 

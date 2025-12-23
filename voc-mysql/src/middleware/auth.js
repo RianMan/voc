@@ -1,4 +1,4 @@
-import { getUserById } from '../db.js';
+import { getUserById } from '../db/index.js';
 
 // 简单的 session 存储（生产环境应用 Redis）
 const sessions = new Map();

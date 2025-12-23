@@ -9,9 +9,9 @@
  * 5. ✅ 处理大数据量情况（分页/采样）
  */
 
-import pool from '../db.js';
+import pool from '../db/index.js';
 import OpenAI from 'openai';
-import { recordAICost } from '../db.js';
+import { recordAICost } from '../db/index.js';
 
 let aiClient = null;
 

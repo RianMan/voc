@@ -7,7 +7,7 @@ import {
   getStatusBatch,
   recordAICost,
   getWeeklyStatusLogs
-} from '../db.js';
+} from '../db/index.js';
 
 let client = null;
 

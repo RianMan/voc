@@ -8,8 +8,8 @@
  * 3. 存储聚类结果
  */
 
-import pool from '../db.js';
-import { recordAICost } from '../db.js';
+import pool from '../db/index.js';
+import { recordAICost } from '../db/index.js';
 import { loadAllReports } from './dataLoader.js';
 import OpenAI from 'openai';
 

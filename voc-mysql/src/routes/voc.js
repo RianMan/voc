@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { loadDataWithStatus, filterData, paginate } from '../services/dataLoader.js';
-import { getNotes, addNote, getStatusHistory, getCostStats, getVocStats, getVocTrend  } from '../db.js';
+import { getNotes, addNote, getStatusHistory, getCostStats, getVocStats, getVocTrend  } from '../db/index.js';
 
 const router = Router();
 

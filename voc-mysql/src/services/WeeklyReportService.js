@@ -5,13 +5,13 @@
  * 整合功能1-3的结果，生成结构化周报
  */
 
-import pool from '../db.js';
-import { recordAICost } from '../db.js';
+import pool from '../db/index.js';
+import { recordAICost } from '../db/index.js';
 import { loadAllReports, filterData } from './dataLoader.js';
 import { getLatestClusterSummary } from './ClusterService.js';
 import { getVerificationSummary } from './VerificationService.js';
 import { getTopicAnalysisHistory, getTopics } from './TopicService.js';
-import { getStatusBatch, saveReport, getLastReport, ACTIVE_STATUSES } from '../db.js';
+import { getStatusBatch, saveReport, getLastReport, ACTIVE_STATUSES } from '../db/index.js';
 import OpenAI from 'openai';
 
 let aiClient = null;

@@ -1,5 +1,5 @@
 import gplay from 'google-play-scraper';
-import pool from './db.js';
+import pool from './db/index.js';
 
 // ==========================================
 // 配置：每个应用 × 多个语言视角

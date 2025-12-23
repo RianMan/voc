@@ -1,11 +1,9 @@
 import { Router } from 'express';
-import { generateReport } from '../services/reportGen.js';
-import { generateReportWithQW } from '../services/reportGenQW.js';
 import { 
   generateReportForApp, 
   generateAllAppReports,
   groupDataByApp 
-} from '../services/reportGenV2.js';
+} from '../services/ReportService.js';
 import { loadAllReports } from '../services/dataLoader.js';
 import { 
   getAllReports, 
@@ -13,46 +11,11 @@ import {
   getReportById,
   getAllApps,
   upsertAppConfig
-} from '../db.js';
+} from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
 
 const router = Router();
 
-/**
- * POST /api/report/generate
- * 生成 AI 分析报告 (DeepSeek) - 旧版兼容
- */
-router.post('/report/generate', async (req, res) => {
-  try {
-    const { filters = {}, limit = 100 } = req.body;
-    const result = await generateReport(filters, limit);
-    res.json(result);
-  } catch (e) {
-    console.error('[Report] Generation failed:', e);
-    res.status(500).json({ 
-      error: 'Report generation failed', 
-      message: e.message 
-    });
-  }
-});
-
-/**
- * POST /api/report/generate-qw
- * 生成 AI 分析报告 (通义千问) - 旧版兼容
- */
-router.post('/report/generate-qw', async (req, res) => {
-  try {
-    const { filters = {}, limit = 100 } = req.body;
-    const result = await generateReportWithQW(filters, limit);
-    res.json(result);
-  } catch (e) {
-    console.error('[Report-QW] Generation failed:', e);
-    res.status(500).json({ 
-      error: 'Report generation failed', 
-      message: e.message 
-    });
-  }
-});
 
 /**
  * POST /api/report/generate-app

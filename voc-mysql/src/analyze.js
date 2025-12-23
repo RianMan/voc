@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
-import pool from './db.js';
-import { recordAICost } from './db.js';
+import { pool } from './db/index.js';
+import { recordAICost } from './db/index.js';
 
 dotenv.config();
 
