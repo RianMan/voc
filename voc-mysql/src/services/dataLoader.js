@@ -18,7 +18,7 @@ export async function loadDataWithStatus() {
  * 通用筛选与分页函数 (核心逻辑 - 修复版)
  */
 export async function filterData(filters, page = 1, limit = 50) {
-    const { category, risk, country, search, startDate, endDate, status, reportMode, appId } = filters;
+    const { category, risk, country, search, startDate, endDate, status, reportMode, appId, source } = filters;
     
     // 1. 构建基础查询部分 (FROM ... JOIN ... WHERE ...)
     // 这样可以同时用于 Count查询 和 Data查询，避免 indexOf 截取错误
@@ -74,6 +74,11 @@ export async function filterData(filters, page = 1, limit = 50) {
     // 报告模式：过滤掉 Low 和 Positive
     if (reportMode === 'true' || reportMode === true) {
         baseSql += " AND f.risk_level != 'Low' AND f.category != 'Positive'";
+    }
+
+    if (source && source !== 'All') {
+        baseSql += ' AND f.source = ?';
+        params.push(source);
     }
 
     // 搜索 (同时搜原文、翻译和摘要)

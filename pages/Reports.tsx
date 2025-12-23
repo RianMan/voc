@@ -147,6 +147,7 @@ const ActionButtons: React.FC<{
 };
 
 export const Reports: React.FC = () => {
+  const [sourceFilter, setSourceFilter] = useState<string>('All');
   const [data, setData] = useState<VOCItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [totalItems, setTotalItems] = useState(0);
@@ -205,7 +206,8 @@ export const Reports: React.FC = () => {
         search: debouncedSearch,
         startDate: dateRange.start,
         endDate: dateRange.end,
-        status: statusFilter
+        status: statusFilter,
+        source: sourceFilter
       };
       
       if (selectedApp !== 'All') {
@@ -443,6 +445,13 @@ export const Reports: React.FC = () => {
             <option value="User_Error">User Error</option>
             <option value="Other">Other</option>
           </select>
+          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="All">来源: 全部</option>
+          <option value="google_play">Google Play</option>
+          <option value="udesk_chat">Udesk 在线客服</option>
+          <option value="udesk_voice">Udesk 电话</option>
+        </select>
+
           <select value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
             <option value="All">风险: 全部</option>
             <option value="High">High</option>
@@ -500,6 +509,7 @@ export const Reports: React.FC = () => {
                   />
                 </th>
                 <th className="px-4 py-4 whitespace-nowrap">时间</th>
+                <th className="px-4 py-4 whitespace-nowrap">来源</th>
                 <th className="px-4 py-4 whitespace-nowrap">App</th>
                 {/* [修改] 拆分列 */}
                 <th className="px-4 py-4 whitespace-nowrap">风险</th>
@@ -538,6 +548,14 @@ export const Reports: React.FC = () => {
                         </span>
                         <span className="text-xs text-slate-400">{item.country}</span>
                       </div>
+                    </td>
+                    <td className="px-4 py-4 align-top">
+                      <span className={`text-xs px-2 py-1 rounded font-medium
+                        ${item.source === 'google_play' ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'}`}>
+                        {item.source === 'google_play' ? 'GP' : 
+                        item.source === 'udesk_chat' ? 'UD-Chat' : 
+                        item.source === 'udesk_voice' ? 'UD-Call' : 'Unknown'}
+                      </span>
                     </td>
                     {/* [修改] 风险单独列 */}
                     <td className="px-4 py-4 align-top">

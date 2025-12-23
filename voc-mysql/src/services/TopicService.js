@@ -262,6 +262,9 @@ export async function getTopicMatchedReviews(topicId, options = {}) {
 /**
  * AI 分析专题反馈
  */
+/**
+ * AI 分析专题反馈
+ */
 export async function analyzeTopicWithAI(topicId, reviews) {
   const [topicRows] = await pool.execute('SELECT * FROM topic_configs WHERE id = ?', [topicId]);
   if (topicRows.length === 0) throw new Error('专题不存在');
@@ -313,16 +316,25 @@ ${JSON.stringify(reviews.slice(0, 50).map(r => ({
   const today = new Date();
   const periodStart = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
   
+  // 👇 准备样本评论数据
+  const sampleReviews = reviews.slice(0, 10).map(r => ({
+    id: r.review_id,
+    text: r.matched_text,
+    date: r.created_at,
+    keywords: r.matched_keywords
+  }));
+  
   await pool.execute(
     `INSERT INTO topic_analysis 
      (topic_id, analysis_date, period_start, period_end, total_matches,
       sentiment_positive, sentiment_negative, sentiment_neutral,
-      ai_summary, pain_points, recommendations)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ai_summary, pain_points, recommendations, sample_reviews)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        ai_summary = VALUES(ai_summary),
        pain_points = VALUES(pain_points),
-       recommendations = VALUES(recommendations)`,
+       recommendations = VALUES(recommendations),
+       sample_reviews = VALUES(sample_reviews)`,
     [
       topicId,
       today.toISOString().split('T')[0],
@@ -334,7 +346,8 @@ ${JSON.stringify(reviews.slice(0, 50).map(r => ({
       result.sentimentBreakdown?.neutral || 0,
       result.summary,
       JSON.stringify(result.painPoints),
-      JSON.stringify(result.recommendations)
+      JSON.stringify(result.recommendations),
+      JSON.stringify(sampleReviews)  // 👈 新增
     ]
   );
   

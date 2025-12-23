@@ -132,3 +132,20 @@ export interface ReviewNote {
   content: string;
   created_at: string;
 }
+
+
+export interface GenerateReportResponse {
+  success: boolean;
+  report: string;
+  meta: {
+    appId: string;
+    appName: string;
+    weekNumber: number;
+    year: number;
+    totalAnalyzed: number;
+    newThisWeek: number;
+    resolved: number;
+    generatedBy: string;
+    generatedAt: string;
+  };
+}

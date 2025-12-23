@@ -1,8 +1,38 @@
 import { Router } from 'express';
 import { loadDataWithStatus, filterData, paginate } from '../services/dataLoader.js';
-import { getNotes, addNote, getStatusHistory, getCostStats } from '../db.js';
+import { getNotes, addNote, getStatusHistory, getCostStats, getVocStats, getVocTrend  } from '../db.js';
 
 const router = Router();
+
+/**
+ * GET /api/voc/stats
+ * 获取统计数据（不分页）
+ */
+router.get('/stats', async (req, res) => {
+    try {
+        const { appId } = req.query;
+        const stats = await getVocStats(appId);
+        res.json({ success: true, data: stats });
+    } catch (e) {
+        console.error('[VOC Stats] Failed:', e);
+        res.status(500).json({ error: 'Get stats failed' });
+    }
+});
+
+/**
+ * GET /api/voc/trend
+ * 获取周趋势数据
+ */
+router.get('/trend', async (req, res) => {
+    try {
+        const { appId, weeks = 8 } = req.query;
+        const trend = await getVocTrend(appId, weeks);
+        res.json({ success: true, data: trend });
+    } catch (e) {
+        console.error('[VOC Trend] Failed:', e);
+        res.status(500).json({ error: 'Get trend failed' });
+    }
+});
 
 /**
  * GET /api/voc/voc-data

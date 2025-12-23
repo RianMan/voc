@@ -413,6 +413,27 @@ export const TopicManager: React.FC = () => {
                         </div>
                       </div>
                     )}
+
+                    {analysis.sample_reviews && analysis.sample_reviews.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-slate-100">
+                        <details>
+                          <summary className="cursor-pointer text-sm font-medium text-blue-600 hover:text-blue-800">
+                            📝 查看 {analysis.sample_reviews.length} 条样本评论
+                          </summary>
+                          <div className="mt-2 space-y-2 max-h-60 overflow-y-auto">
+                            {analysis.sample_reviews.map((sample, idx) => (
+                              <div key={idx} className="text-xs bg-slate-50 p-2 rounded border-l-2 border-blue-300">
+                                <p className="text-slate-700">{sample.text}</p>
+                                <div className="flex justify-between mt-1 text-slate-400">
+                                  <span>匹配: {sample.keywords?.join(', ')}</span>
+                                  <span>{new Date(sample.date).toLocaleDateString()}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      </div>
+                    )}
                   </div>
                 ))
               )}

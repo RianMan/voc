@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
-import { VOCItem, AppInfo } from '../types';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line, Legend } from 'recharts';
+import { VOCItem } from '../types';
 import { 
   AlertTriangle, Bug, MessageCircle, TrendingUp, TrendingDown, 
-  Layers, Target, Tag, FileText, Loader2
+  Layers, Target, Tag, Loader2
 } from 'lucide-react';
-import { fetchClusterSummary, fetchVerificationSummary, fetchTopics } from '../services/api';
+import { 
+  fetchClusterSummary, 
+  fetchVerificationSummary, 
+  fetchTopics,
+  fetchVocStats,
+  fetchVocTrend
+} from '../services/api';
 
 interface DashboardProps {
   data: VOCItem[];
@@ -24,8 +30,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   const [verificationSummary, setVerificationSummary] = useState<any[]>([]);
   const [topicCount, setTopicCount] = useState<number>(0);
   const [loadingAdvanced, setLoadingAdvanced] = useState(false);
+  
+  // 新增：统计数据和趋势
+  const [stats, setStats] = useState<any>(null);
+  const [trendData, setTrendData] = useState<any[]>([]);
+  const [loadingStats, setLoadingStats] = useState(false);
 
-  // 获取所有App
   const apps = Array.from(new Set(safeData.map(d => d.appId).filter(Boolean)));
   
   useEffect(() => {
@@ -37,6 +47,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   useEffect(() => {
     if (selectedApp) {
       loadAdvancedData();
+      loadStats();
+      loadTrend();
     }
   }, [selectedApp]);
 
@@ -58,20 +70,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     }
   };
 
-  // 基础统计
-  const total = safeData.length;
-  const highRisk = safeData.filter(i => i.risk_level === 'High').length;
-  const bugs = safeData.filter(i => i.category === 'Tech_Bug').length;
-  const compliance = safeData.filter(i => i.category === 'Compliance_Risk').length;
-  const product = safeData.filter(i => i.category === 'Product_Issue').length;
-  const others = safeData.filter(i => ['Positive', 'User_Error', 'Other'].includes(i.category)).length;
+  const loadStats = async () => {
+    setLoadingStats(true);
+    try {
+      const result = await fetchVocStats(selectedApp);
+      if (result.success) {
+        setStats(result.data);
+      }
+    } catch (e) {
+      console.error('Load stats failed', e);
+    } finally {
+      setLoadingStats(false);
+    }
+  };
 
-  // ✅ 修复：中文化 + 过滤 0 值 + 重命名 Other
+  const loadTrend = async () => {
+    try {
+      const result = await fetchVocTrend(selectedApp, 8);
+      if (result.success) {
+        setTrendData(result.data.map((item: any) => ({
+          week: `W${item.week}`,
+          好评率: parseFloat(((item.positive / item.total) * 100).toFixed(1)),
+          差评率: parseFloat(((item.negative / item.total) * 100).toFixed(1)),
+        })));
+      }
+    } catch (e) {
+      console.error('Load trend failed', e);
+    }
+  };
+
+  // 使用真实统计数据
+  const total = stats?.total || 0;
+  const highRisk = stats?.high_risk || 0;
+  const bugs = stats?.tech_bug || 0;
+  const compliance = stats?.compliance || 0;
+
   const categoryData = [
     { name: '合规风险', value: compliance, color: '#ef4444' },
     { name: '技术Bug', value: bugs, color: '#f59e0b' },
-    { name: '产品问题', value: product, color: '#3b82f6' },
-    { name: '其他反馈', value: others, color: '#94a3b8' },
+    { name: '产品问题', value: Math.max(0, total - compliance - bugs), color: '#3b82f6' },
   ].filter(item => item.value > 0);
 
   const presentCountries = Array.from(new Set(safeData.map(i => i.country).filter(Boolean)));
@@ -86,7 +123,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex items-start justify-between">
       <div>
         <p className="text-sm font-medium text-slate-500 mb-1">{title}</p>
-        <h3 className="text-2xl font-bold text-slate-900">{value}</h3>
+        <h3 className="text-2xl font-bold text-slate-900">{loadingStats ? '...' : value.toLocaleString()}</h3>
         <p className={`text-xs mt-2 font-medium ${sub.includes('+') ? 'text-green-600' : 'text-slate-400'}`}>{sub}</p>
       </div>
       <div className={`p-3 rounded-lg ${color}`}>
@@ -95,7 +132,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     </div>
   );
 
-  // ✅ 新增：获取 AppName 的辅助函数
   const getAppName = (appId: string) => {
     return safeData.find(d => d.appId === appId)?.appName || appId;
   };
@@ -130,17 +166,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
 
       {/* Advanced Features Overview */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Cluster Summary */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
           <div className="flex items-center gap-2 mb-4">
             <Layers size={20} className="text-blue-500" />
             <h3 className="text-lg font-semibold text-slate-800">本周 Top 痛点</h3>
           </div>
-          {/* ✅ 增加 AppName 显示 */}
           {selectedApp && (
-            <p className="text-xs text-slate-400 mb-3">
-              📱 {getAppName(selectedApp)}
-            </p>
+            <p className="text-xs text-slate-400 mb-3">📱 {getAppName(selectedApp)}</p>
           )}
           {loadingAdvanced ? (
             <div className="flex justify-center py-8">
@@ -169,17 +201,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
           )}
         </div>
 
-        {/* Verification Summary */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
           <div className="flex items-center gap-2 mb-4">
             <Target size={20} className="text-green-500" />
             <h3 className="text-lg font-semibold text-slate-800">闭环验证</h3>
           </div>
-          {/* ✅ 增加 AppName 显示 */}
           {selectedApp && (
-            <p className="text-xs text-slate-400 mb-3">
-              📱 {getAppName(selectedApp)}
-            </p>
+            <p className="text-xs text-slate-400 mb-3">📱 {getAppName(selectedApp)}</p>
           )}
           {loadingAdvanced ? (
             <div className="flex justify-center py-8">
@@ -204,17 +232,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
           )}
         </div>
 
-        {/* Quick Stats */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
           <div className="flex items-center gap-2 mb-4">
             <Tag size={20} className="text-purple-500" />
             <h3 className="text-lg font-semibold text-slate-800">监控配置</h3>
           </div>
-          {/* ✅ 增加 AppName 显示 */}
           {selectedApp && (
-            <p className="text-xs text-slate-400 mb-3">
-              📱 {getAppName(selectedApp)}
-            </p>
+            <p className="text-xs text-slate-400 mb-3">📱 {getAppName(selectedApp)}</p>
           )}
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-purple-50 rounded-lg p-4 text-center">
@@ -268,17 +292,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
         </div>
 
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-          <h3 className="text-lg font-semibold text-slate-800 mb-6">各国反馈量</h3>
+          <h3 className="text-lg font-semibold text-slate-800 mb-6">好评/差评趋势（近8周）</h3>
           <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={sourceData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
-                <YAxis axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip cursor={{ fill: '#f1f5f9' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                <Bar dataKey="users" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
-              </BarChart>
-            </ResponsiveContainer>
+            {trendData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="week" />
+                  <YAxis />
+                  <Tooltip formatter={(value) => `${value}%`} />
+                  <Legend />
+                  <Line type="monotone" dataKey="好评率" stroke="#10b981" strokeWidth={2} />
+                  <Line type="monotone" dataKey="差评率" stroke="#ef4444" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-slate-400">
+                暂无趋势数据
+              </div>
+            )}
           </div>
         </div>
       </div>
