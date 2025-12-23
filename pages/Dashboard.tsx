@@ -66,12 +66,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   const product = safeData.filter(i => i.category === 'Product_Issue').length;
   const others = safeData.filter(i => ['Positive', 'User_Error', 'Other'].includes(i.category)).length;
 
+  // ✅ 修复：中文化 + 过滤 0 值 + 重命名 Other
   const categoryData = [
-    { name: 'Compliance', value: compliance, color: '#ef4444' },
-    { name: 'Tech Bugs', value: bugs, color: '#f59e0b' },
-    { name: 'Product', value: product, color: '#3b82f6' },
-    { name: 'Other', value: others, color: '#94a3b8' },
-  ];
+    { name: '合规风险', value: compliance, color: '#ef4444' },
+    { name: '技术Bug', value: bugs, color: '#f59e0b' },
+    { name: '产品问题', value: product, color: '#3b82f6' },
+    { name: '其他反馈', value: others, color: '#94a3b8' },
+  ].filter(item => item.value > 0);
 
   const presentCountries = Array.from(new Set(safeData.map(i => i.country).filter(Boolean)));
   const targetCountries = presentCountries.length > 0 ? presentCountries : ['PK', 'MX', 'PH', 'ID', 'TH'];
@@ -93,6 +94,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       </div>
     </div>
   );
+
+  // ✅ 新增：获取 AppName 的辅助函数
+  const getAppName = (appId: string) => {
+    return safeData.find(d => d.appId === appId)?.appName || appId;
+  };
 
   return (
     <div className="space-y-6">
@@ -130,6 +136,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
             <Layers size={20} className="text-blue-500" />
             <h3 className="text-lg font-semibold text-slate-800">本周 Top 痛点</h3>
           </div>
+          {/* ✅ 增加 AppName 显示 */}
+          {selectedApp && (
+            <p className="text-xs text-slate-400 mb-3">
+              📱 {getAppName(selectedApp)}
+            </p>
+          )}
           {loadingAdvanced ? (
             <div className="flex justify-center py-8">
               <Loader2 className="animate-spin text-slate-300" size={24} />
@@ -163,6 +175,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
             <Target size={20} className="text-green-500" />
             <h3 className="text-lg font-semibold text-slate-800">闭环验证</h3>
           </div>
+          {/* ✅ 增加 AppName 显示 */}
+          {selectedApp && (
+            <p className="text-xs text-slate-400 mb-3">
+              📱 {getAppName(selectedApp)}
+            </p>
+          )}
           {loadingAdvanced ? (
             <div className="flex justify-center py-8">
               <Loader2 className="animate-spin text-slate-300" size={24} />
@@ -192,6 +210,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
             <Tag size={20} className="text-purple-500" />
             <h3 className="text-lg font-semibold text-slate-800">监控配置</h3>
           </div>
+          {/* ✅ 增加 AppName 显示 */}
+          {selectedApp && (
+            <p className="text-xs text-slate-400 mb-3">
+              📱 {getAppName(selectedApp)}
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-purple-50 rounded-lg p-4 text-center">
               <p className="text-2xl font-bold text-purple-700">{topicCount}</p>

@@ -8,6 +8,8 @@ import {
   CheckCircle2, XCircle, Minus, TrendingDown, TrendingUp,
   Plus, Play, RefreshCw, Loader2, X, History, Target
 } from 'lucide-react';
+import { VerificationHistoryDrawer } from '../components/VerificationHistoryDrawer';
+import {formatDate} from '../tools/index'
 
 const STATUS_CONFIG = {
   monitoring: { label: '监控中', color: 'blue', icon: Target },
@@ -29,7 +31,16 @@ export const VerificationTracker: React.FC = () => {
   
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showHistoryModal, setShowHistoryModal] = useState<{ config: VerificationConfig; history: VerificationResult[] } | null>(null);
+  // const [showHistoryModal, setShowHistoryModal] = useState<{ config: VerificationConfig; history: VerificationResult[] } | null>(null);
+  const [historyDrawer, setHistoryDrawer] = useState<{
+    open: boolean;
+    config: VerificationConfig | null;
+    history: VerificationResult[];
+  }>({
+    open: false,
+    config: null,
+    history: []
+  });
   const [createMode, setCreateMode] = useState<'quick' | 'advanced'>('quick');
   
   // Form
@@ -149,8 +160,13 @@ export const VerificationTracker: React.FC = () => {
 
   const handleViewHistory = async (config: VerificationConfig) => {
     const res = await fetchVerificationHistory(config.id);
-    setShowHistoryModal({ config, history: res.data || [] });
+    setHistoryDrawer({
+      open: true,
+      config,
+      history: res.data || []
+    });
   };
+
 
   const getStatusConfig = (status: string) => {
     return STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.monitoring;
@@ -262,8 +278,8 @@ export const VerificationTracker: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-4 py-4 text-xs text-slate-500">
-                      <div>基准: {v.baseline_start} ~ {v.baseline_end}</div>
-                      <div>验证: {v.verify_start} ~</div>
+                      <div>基准: {formatDate(v.baseline_start)} ~ {formatDate(v.baseline_end)}</div>
+                      <div>验证: {formatDate(v.verify_start)} ~</div>
                     </td>
                     <td className="px-4 py-4 text-right">
                       <div className="flex justify-end gap-2">
@@ -451,59 +467,15 @@ export const VerificationTracker: React.FC = () => {
         </div>
       )}
 
-      {/* History Modal */}
-      {showHistoryModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b">
-              <h3 className="text-lg font-bold">验证历史 - {showHistoryModal.config.issue_value}</h3>
-              <button onClick={() => setShowHistoryModal(null)} className="p-2 hover:bg-slate-100 rounded-lg">
-                <X size={20} />
-              </button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-4">
-              {showHistoryModal.history.length === 0 ? (
-                <p className="text-center text-slate-400 py-8">暂无验证记录</p>
-              ) : (
-                <div className="space-y-3">
-                  {showHistoryModal.history.map(result => {
-                    const statusCfg = getStatusConfig(result.conclusion);
-                    const changeVal = Number(result.change_percent); // 强制转为数字
-                    return (
-                      <div key={result.id} className="border border-slate-200 rounded-lg p-4">
-                        <div className="flex items-center justify-between mb-3">
-                          <span className="text-sm font-medium">{result.verify_date}</span>
-                          <span className={`px-2 py-1 rounded text-xs font-medium bg-${statusCfg.color}-50 text-${statusCfg.color}-700`}>
-                            {statusCfg.label}
-                          </span>
-                        </div>
-                        
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div className="bg-slate-50 p-3 rounded">
-                            <div className="text-slate-500 text-xs mb-1">基准期</div>
-                            <div className="font-medium">{result.baseline_count} / {result.baseline_total}</div>
-                          </div>
-                          <div className="bg-blue-50 p-3 rounded">
-                            <div className="text-slate-500 text-xs mb-1">验证期</div>
-                            <div className="font-medium">{result.verify_count} / {result.verify_total}</div>
-                          </div>
-                        </div>
-                        
-                        <div className="mt-3 text-center">
-                          <span className={`text-lg font-bold ${changeVal < 0 ? 'text-green-600' : changeVal > 0 ? 'text-red-600' : 'text-slate-600'}`}>
-                            {changeVal > 0 ? '+' : ''}{changeVal?.toFixed(1)}%
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <VerificationHistoryDrawer
+        open={historyDrawer.open}
+        config={historyDrawer.config}
+        history={historyDrawer.history}
+        onClose={() =>
+          setHistoryDrawer({ open: false, config: null, history: [] })
+        }
+        getConclusionText={(r) => getStatusConfig(r.conclusion).label}
+      />
     </div>
   );
 };

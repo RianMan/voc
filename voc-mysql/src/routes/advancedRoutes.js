@@ -268,7 +268,7 @@ router.post('/verifications/quick', authMiddleware, requireRole('admin', 'operat
  */
 router.post('/verifications/:id/run', authMiddleware, async (req, res) => {
   try {
-    const result = await VerificationService.runVerification(parseInt(req.params.id));
+    const result = await VerificationService.runVerification(parseInt(req.params.id), { useAI: true });
     res.json({ success: true, ...result });
   } catch (e) {
     console.error('[Verifications] Run failed:', e);

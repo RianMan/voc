@@ -416,6 +416,9 @@ export interface VerificationResult {
   verify_total: number;
   change_percent: number;
   conclusion: string;
+  baseline_ratio: number;
+  verify_ratio: number;
+  summary: string;
 }
 
 export const fetchVerifications = async (filters?: { appId?: string; status?: string }) => {

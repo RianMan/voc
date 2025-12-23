@@ -41,9 +41,9 @@ export async function createTopic(data) {
   if (scope === 'country' && !country) {
     throw new Error('scope=country 时必须指定 country');
   }
-  if (scope === 'app' && (!country || !appId)) {
-    throw new Error('scope=app 时必须指定 country 和 appId');
-  }
+  // if (scope === 'app' && (!country || !appId)) {
+  //   throw new Error('scope=app 时必须指定 country 和 appId');
+  // }
   
   const [result] = await pool.execute(
     `INSERT INTO topic_configs 

@@ -8,6 +8,7 @@ import {
   Search, Plus, Trash2, Edit2, Play, RefreshCw, X, 
   Loader2, Tag, Globe, MapPin, Smartphone, TrendingUp, TrendingDown
 } from 'lucide-react';
+import {  } from 'lucide-react';
 
 export const TopicManager: React.FC = () => {
   const [topics, setTopics] = useState<TopicConfig[]>([]);
