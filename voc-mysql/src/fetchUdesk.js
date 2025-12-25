@@ -3,130 +3,257 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const UDESK_API = process.env.UDESK_API_URL || 'http://localhost:3999/backend/goapi/udesk/im-query';
+// ==================== 配置区域 ====================
 
-const CHANNEL_TO_APP_MAP = {
-  'Pinjamin': { appId: 'com.pinjamwinwin', country: 'ID' },
-  'MexiCash': { appId: 'com.mexicash.app', country: 'MX' },
-  'MocaMoca': { appId: 'com.mocamoca', country: 'PH' },
-  'SmartQarza': { appId: 'com.creditcat.tech.app', country: 'PK' },
-  'EASY สินเชื่อ': { appId: 'com.thai.credit.finance.reliable.loan.android', country: 'TH' }
-};
+/**
+ * 数据源配置
+ * 每个国家一个 API 地址，包含该国家下的所有 channel（app）
+ */
+const DATA_SOURCES = [
+  {
+    country: 'CN',
+    apiUrl: process.env.UDESK_API_CN || 'http://crm.kuainiu.io/backend/goapi/udesk/im-query-message',
+    channels: [
+      { name: '芸豆', appId: 'com.yundou.cn', appName: '芸豆' }
+      // 未来可以添加中国区其他 app
+    ]
+  },
+  // 未来其他国家的配置示例：
+  // {
+  //   country: 'PK',
+  //   apiUrl: process.env.UDESK_API_PK || 'http://pk.example.com/api/udesk',
+  //   channels: [
+  //     { name: 'SmartQarza', appId: 'com.creditcat.tech.app', appName: 'SmartQarza' }
+  //   ]
+  // },
+  // {
+  //   country: 'MX',
+  //   apiUrl: process.env.UDESK_API_MX || 'http://mx.example.com/api/udesk',
+  //   channels: [
+  //     { name: 'MexiCash', appId: 'com.mexicash.app', appName: 'MexiCash' }
+  //   ]
+  // }
+];
 
-async function fetchUdeskData(channel, startDate, endDate, page = 1) {
-  const response = await fetch(UDESK_API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      start_time: `${startDate} 00:00:00`,
-      end_time: `${endDate} 23:59:59`,
-      customer_channel: channel,
-      page,
-      page_size: 100
-    })
-  });
+// ==================== 核心函数 ====================
 
-  if (!response.ok) {
-    throw new Error(`Udesk API error: ${response.status}`);
-  }
-
-  const result = await response.json();
+/**
+ * 获取上周的日期范围
+ */
+function getLastWeekRange() {
+  const today = new Date();
+  const lastMonday = new Date(today);
+  lastMonday.setDate(today.getDate() - today.getDay() - 6); // 上周一
+  lastMonday.setHours(0, 0, 0, 0);
   
-  if (result.code !== 0) {
-    throw new Error(`Udesk API error: ${result.message}`);
-  }
-
-  return result.data;
+  const lastSunday = new Date(lastMonday);
+  lastSunday.setDate(lastMonday.getDate() + 6); // 上周日
+  lastSunday.setHours(23, 59, 59, 999);
+  
+  return {
+    start: lastMonday.toISOString().split('T')[0],
+    end: lastSunday.toISOString().split('T')[0]
+  };
 }
 
-async function importUdeskSessions() {
-  console.log('🚀 Starting Udesk IM data import...\n');
-
-  const channels = Object.keys(CHANNEL_TO_APP_MAP);
-  const weeks = [
-    { start: '2025-11-25', end: '2025-12-01' },
-    { start: '2025-12-02', end: '2025-12-08' },
-    { start: '2025-12-09', end: '2025-12-15' },
-    { start: '2025-12-16', end: '2025-12-22' }
-  ];
-
-  const conn = await pool.getConnection();
-  let totalImported = 0;
-
+/**
+ * 调用 Udesk API 获取数据
+ */
+async function fetchUdeskPage(apiUrl, channel, startDate, endDate, page = 1, pageSize = 100) {
   try {
-    for (const channel of channels) {
-      const appInfo = CHANNEL_TO_APP_MAP[channel];
-      console.log(`\n📱 Processing ${channel}...`);
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        start_time: `${startDate} 00:00:00`,
+        end_time: `${endDate} 23:59:59`,
+        customer_channel: channel,
+        page,
+        page_size: pageSize
+      })
+    });
 
-      for (const week of weeks) {
-        console.log(`  📅 ${week.start} ~ ${week.end}`);
-
-        const data = await fetchUdeskData(channel, week.start, week.end);
-        const sessions = data.list || [];
-
-        console.log(`    📥 Fetched ${sessions.length} sessions`);
-
-        for (const session of sessions) {
-          // 检查是否已存在
-          const [exists] = await conn.query(
-            'SELECT id FROM voc_feedbacks WHERE source = ? AND external_id = ?',
-            ['udesk_chat', String(session.session_id)]
-          );
-
-          if (exists.length > 0) {
-            continue;
-          }
-
-          // 插入主表
-          const [result] = await conn.execute(
-            `INSERT INTO voc_feedbacks 
-             (source, external_id, source_url, app_id, app_name, country, 
-              user_name, feedback_time, process_status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'raw')`,
-            [
-              'udesk_chat',
-              String(session.session_id),
-              `https://udesk.example.com/session/${session.session_id}`,
-              appInfo.appId,
-              channel,
-              appInfo.country,
-              session.customer_name,
-              new Date(session.session_created_at)
-            ]
-          );
-
-          const feedbackId = result.insertId;
-
-          // 插入消息（只插入用户消息用于AI分析）
-          const userMessages = session.messages.filter(m => m.sender === 'customer');
-          
-          for (let i = 0; i < session.messages.length; i++) {
-            const msg = session.messages[i];
-            await conn.execute(
-              `INSERT INTO voc_feedback_messages 
-               (feedback_id, sequence_num, role, content)
-               VALUES (?, ?, ?, ?)`,
-              [
-                feedbackId,
-                i + 1,
-                msg.sender === 'customer' ? 'user' : 'agent',
-                msg.content_text
-              ]
-            );
-          }
-
-          totalImported++;
-        }
-      }
+    if (!response.ok) {
+      throw new Error(`API 请求失败: ${response.status}`);
     }
 
-    console.log(`\n✅ Import complete! Total: ${totalImported} sessions`);
-  } catch (e) {
-    console.error('❌ Import failed:', e);
-  } finally {
-    conn.release();
-    process.exit();
+    const result = await response.json();
+    
+    if (result.code !== 0) {
+      throw new Error(`API 返回错误: ${result.message}`);
+    }
+
+    return result.data;
+  } catch (error) {
+    console.error(`❌ 请求失败 [${channel}]:`, error.message);
+    return null;
   }
 }
 
-importUdeskSessions();
+/**
+ * 分页获取所有会话数据
+ */
+async function fetchAllSessions(apiUrl, channel, startDate, endDate) {
+  const allSessions = [];
+  let page = 1;
+  const pageSize = 100;
+  
+  console.log(`  📥 开始分页获取...`);
+  
+  while (true) {
+    const data = await fetchUdeskPage(apiUrl, channel, startDate, endDate, page, pageSize);
+    
+    if (!data || !data.list || data.list.length === 0) {
+      break;
+    }
+    
+    allSessions.push(...data.list);
+    console.log(`    第 ${page} 页: ${data.list.length} 条 (总计 ${allSessions.length}/${data.total})`);
+    
+    // 如果已经获取所有数据，退出
+    if (allSessions.length >= data.total) {
+      break;
+    }
+    
+    page++;
+  }
+  
+  return allSessions;
+}
+
+/**
+ * 保存会话到数据库
+ */
+async function saveSessions(sessions, channel, appId, appName, country) {
+  if (sessions.length === 0) {
+    console.log(`  ⚠️  无数据可保存`);
+    return 0;
+  }
+
+  console.log(`  💾 开始入库 ${sessions.length} 条会话...`);
+  
+  let newCount = 0;
+  const conn = await pool.getConnection();
+
+  try {
+    for (const session of sessions) {
+      // 检查是否已存在
+      const [exists] = await conn.query(
+        'SELECT id FROM voc_feedbacks WHERE source = ? AND external_id = ?',
+        ['udesk_chat', String(session.session_id)]
+      );
+
+      if (exists.length > 0) {
+        continue; // 跳过重复数据
+      }
+
+      // 插入主表
+      const [result] = await conn.execute(
+        `INSERT INTO voc_feedbacks 
+         (source, external_id, source_url, app_id, app_name, country, 
+          user_name, feedback_time, process_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'raw')`,
+        [
+          'udesk_chat',
+          String(session.session_id),
+          `https://udesk.example.com/session/${session.session_id}`, // 可以配置实际的工单链接
+          appId,
+          appName,
+          country,
+          session.customer_name || 'Guest',
+          new Date(session.session_created_at)
+        ]
+      );
+
+      const feedbackId = result.insertId;
+
+      // 插入所有消息（保留完整对话）
+      for (let i = 0; i < session.messages.length; i++) {
+        const msg = session.messages[i];
+        
+        // 跳过系统消息
+        if (msg.sender === 'sys') {
+          continue;
+        }
+        
+        await conn.execute(
+          `INSERT INTO voc_feedback_messages 
+           (feedback_id, sequence_num, role, content)
+           VALUES (?, ?, ?, ?)`,
+          [
+            feedbackId,
+            i + 1,
+            msg.sender === 'customer' ? 'user' : 'agent',
+            msg.content_text
+          ]
+        );
+      }
+
+      newCount++;
+    }
+    
+    console.log(`  ✅ 新增 ${newCount} 条 (跳过 ${sessions.length - newCount} 条重复)`);
+    return newCount;
+  } catch (error) {
+    console.error(`  ❌ 入库失败:`, error.message);
+    return 0;
+  } finally {
+    conn.release();
+  }
+}
+
+/**
+ * 主函数
+ */
+async function main() {
+  console.log('🚀 开始 Udesk 数据同步任务\n');
+  
+  // 获取上周日期范围
+  const { start, end } = getLastWeekRange();
+  console.log(`📅 时间范围: ${start} ~ ${end}\n`);
+  
+  let totalImported = 0;
+  
+  // 遍历所有数据源
+  for (const source of DATA_SOURCES) {
+    console.log(`\n🌍 国家: ${source.country} (${source.apiUrl})`);
+    
+    // 遍历该国家下的所有 channel
+    for (const channel of source.channels) {
+      console.log(`\n📱 Channel: ${channel.name}`);
+      
+      try {
+        // 1. 获取数据
+        const sessions = await fetchAllSessions(
+          source.apiUrl, 
+          channel.name, 
+          start, 
+          end
+        );
+        
+        // 2. 保存数据
+        const imported = await saveSessions(
+          sessions,
+          channel.name,
+          channel.appId,
+          channel.appName,
+          source.country
+        );
+        
+        totalImported += imported;
+        
+      } catch (error) {
+        console.error(`❌ ${channel.name} 处理失败:`, error.message);
+      }
+    }
+  }
+  
+  console.log(`\n\n🎉 同步完成！总计导入 ${totalImported} 条新会话`);
+  process.exit(0);
+}
+
+// 执行
+main().catch(error => {
+  console.error('💥 任务失败:', error);
+  process.exit(1);
+});

@@ -464,11 +464,11 @@ export async function generateAllAppReports(user = null) {
 /**
  * 为指定App生成报告（供API调用）
  */
-export async function generateReportForApp(appId, filters = {}, limit = 200, user = null) {
+export async function generateReportForApp(appId, filters = {}, user = null) {
   const result = await loadAllReports();
   let data = result.data;
   
-  // 筛选指定App
+  // 1. 筛选指定App
   data = data.filter(item => item.appId === appId);
   
   if (data.length === 0) {
@@ -478,7 +478,7 @@ export async function generateReportForApp(appId, filters = {}, limit = 200, use
     };
   }
 
-  // 获取状态
+  // 2. 获取状态
   const allIds = data.map(d => d.id).filter(Boolean);
   const statusMap = await getStatusBatch(allIds);
   data = data.map(item => ({
@@ -486,7 +486,18 @@ export async function generateReportForApp(appId, filters = {}, limit = 200, use
     status: statusMap[item.id]?.status || 'pending'
   }));
 
-  // 应用其他筛选
+  // 3. ✅ 修复：筛选本周数据
+  const now = new Date();
+  const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  
+  if (!filters.startDate) {
+    data = data.filter(item => {
+      const itemDate = new Date(item.date);
+      return itemDate >= oneWeekAgo;
+    });
+  }
+
+  // 4. 应用其他筛选
   if (filters.category && filters.category !== 'All') {
     data = data.filter(item => item.category === filters.category);
   }
@@ -495,5 +506,7 @@ export async function generateReportForApp(appId, filters = {}, limit = 200, use
   }
 
   const appName = data[0]?.appName || appId;
-  return generateAppReport(appId, appName, data.slice(0, limit), {}, user);
+  
+  // ✅ 修复：不限制条数，分析所有筛选后的数据
+  return generateAppReport(appId, appName, data, {}, user);
 }
