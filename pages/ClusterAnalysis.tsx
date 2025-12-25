@@ -66,7 +66,13 @@ export const ClusterAnalysis: React.FC = () => {
     try {
       const result = await runClustering(selectedApp, selectedCategory, startDate, endDate);
       if (result.success) {
-        alert(`聚类完成！分析 ${result.totalAnalyzed} 条，生成 ${result.clustersCreated} 个聚类`);
+        if (result.skipped) {
+          // 👈 优化提示信息
+          const timeInfo = result.dateRange || '所选时间区间内';
+          alert(`${timeInfo}\n当前分析样本不足3条（实际${result.count}条），无法进行聚类分析。\n\n建议：选择更长的时间范围或检查该分类下的数据。`);
+        } else {
+          alert(`聚类完成！分析 ${result.totalAnalyzed} 条，生成 ${result.clustersCreated} 个聚类`);
+        }
         loadClusters();
       } else if (result.skipped) {
         alert(`数据量不足（${result.count}条），跳过聚类`);

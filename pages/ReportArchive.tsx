@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Report, AppInfo } from '../types';
 import { fetchReports, fetchApps } from '../services/api';
 import { FileText, ChevronRight, Loader2, X, Copy, Download, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import {copyToClipboard} from '../tools/index'
 
 // Markdown解析
 function parseMarkdown(md: string): string {
@@ -9,6 +10,7 @@ function parseMarkdown(md: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+    .replace(/^#### (.+)$/gm, '<h4 class="text-base font-semibold mt-4 mb-2">$1</h3>')
     .replace(/^### (.+)$/gm, '<h3 class="text-base font-semibold mt-4 mb-2">$1</h3>')
     .replace(/^## (.+)$/gm, '<h2 class="text-lg font-bold mt-6 mb-3 text-slate-800">$1</h2>')
     .replace(/^# (.+)$/gm, '<h1 class="text-xl font-bold mt-4 mb-4 text-slate-900 border-b pb-2">$1</h1>')
@@ -248,7 +250,7 @@ export const ReportArchive: React.FC = () => {
             <div className="p-4 border-t border-slate-200 flex justify-end gap-3">
               <button
                 onClick={() => {
-                  navigator.clipboard.writeText(selectedReport.content);
+                  copyToClipboard(selectedReport.content)
                   alert('已复制到剪贴板');
                 }}
                 className="px-4 py-2 text-sm bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-2"

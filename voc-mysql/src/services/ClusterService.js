@@ -188,10 +188,11 @@ export async function runClusteringForApp(appId, category, options = {}) {
     const itemDate = new Date(item.date);
     return itemDate >= start && itemDate <= end;
   });
-  
+  const startStr = start.toISOString().split('T')[0];
+  const endStr = end.toISOString().split('T')[0];
   if (reviews.length < 3) {
     console.log(`[Cluster] 评论数不足(${reviews.length})，跳过聚类`);
-    return { success: true, skipped: true, reason: 'insufficient_data', count: reviews.length };
+    return { success: true, skipped: true, reason: 'insufficient_data', count: reviews.length,  dateRange: `${startStr} ~ ${endStr}`, totalAnalyzed: 0, clustersCreated: 0   };
   }
   
   // AI 聚类

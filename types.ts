@@ -84,6 +84,7 @@ export interface FilterParams {
   status?: string;
   reportMode?: boolean;
   appId?: string;
+  source?: string; 
 }
 
 export interface AppInfo {

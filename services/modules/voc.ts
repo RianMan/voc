@@ -18,6 +18,7 @@ export async function fetchVocData(params: FilterParams): Promise<PaginatedRespo
   if (params.endDate) query.set('endDate', params.endDate);
   if (params.status && params.status !== 'All') query.set('status', params.status);
   if (params.appId && params.appId !== 'All') query.set('appId', params.appId);
+   if (params.source && params.source !== 'All') query.set('source', params.source);
   if (params.reportMode) query.set('reportMode', 'true');
 
   const res = await authFetch(`${API_BASE}/voc-data?${query.toString()}`);

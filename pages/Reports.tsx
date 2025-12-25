@@ -15,6 +15,8 @@ import {
   CheckSquare, X, Copy, ExternalLink, Archive, ChevronDown, ChevronUp,
   Check, Ban, Send, Clock, CheckCircle, Loader, CheckCircle2, MessageSquare
 } from 'lucide-react';
+import {copyToClipboard} from '../tools/index'
+
 
 // 简易 Markdown 解析器
 function parseMarkdown(md: string): string {
@@ -22,6 +24,7 @@ function parseMarkdown(md: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+    .replace(/^#### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^# (.+)$/gm, '<h1>$1</h1>')
@@ -231,7 +234,7 @@ export const Reports: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, pageSize, categoryFilter, riskFilter, debouncedSearch, dateRange, statusFilter, selectedApp]);
+  }, [currentPage, pageSize, categoryFilter, riskFilter, debouncedSearch, dateRange, statusFilter, selectedApp, sourceFilter]);
 
   useEffect(() => {
     loadData();
@@ -239,7 +242,7 @@ export const Reports: React.FC = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [pageSize, categoryFilter, riskFilter, debouncedSearch, dateRange, statusFilter, selectedApp]);
+  }, [pageSize, categoryFilter, riskFilter, debouncedSearch, dateRange, statusFilter, selectedApp, sourceFilter]);
 
   const toggleSelectAll = () => {
     if (selectedIds.size === data.length) {
@@ -664,26 +667,8 @@ export const Reports: React.FC = () => {
                 <button
                   onClick={() => {
                     if (reportContent) {
-                      // ✅ 修复后：使用 Promise 链式调用，并增加错误捕获
-                      navigator.clipboard.writeText(reportContent)
-                        .then(() => {
-                          alert('✅ 已复制到剪贴板');
-                        })
-                        .catch((err) => {
-                          console.error('复制失败:', err);
-                          // 备用方案：如果 clipboard API 失败（比如非 HTTPS 环境），尝试传统方法
-                          try {
-                            const textArea = document.createElement("textarea");
-                            textArea.value = reportContent;
-                            document.body.appendChild(textArea);
-                            textArea.select();
-                            document.execCommand('copy');
-                            document.body.removeChild(textArea);
-                            alert('✅ 已复制到剪贴板 (兼容模式)');
-                          } catch (e) {
-                            alert('❌ 复制失败，请手动选择文本复制');
-                          }
-                        });
+                      copyToClipboard(reportContent)
+                      alert('✅ 已复制到剪贴板');
                     }
                   }}
                   className="px-4 py-2 text-sm bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-2"
