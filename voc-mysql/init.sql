@@ -332,3 +332,32 @@ CREATE TABLE scheduled_task_logs (
     error_message TEXT,
     result_summary JSON
 ) ENGINE=InnoDB;
+
+CREATE TABLE review_groups (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    app_id VARCHAR(100) NOT NULL,
+    group_title VARCHAR(200) NOT NULL COMMENT '问题标题',
+    group_rank INT NOT NULL COMMENT '优先级排名',
+    review_count INT NOT NULL COMMENT '涉及评论数',
+    percentage DECIMAL(5,2) COMMENT '占比',
+    
+    -- 关联的评论ID
+    review_ids JSON NOT NULL COMMENT '数据库ID列表',
+    
+    -- AI分析结果
+    root_cause_summary TEXT,
+    action_suggestion TEXT,
+    sample_reviews JSON COMMENT '代表性评论',
+    
+    -- 自动归类(可选，保留灵活性)
+    auto_category VARCHAR(50) COMMENT 'AI自动分类',
+    
+    -- 状态管理
+    status ENUM('pending', 'confirmed', 'in_progress', 'resolved') DEFAULT 'pending',
+    assigned_to VARCHAR(100),
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_app_rank (app_id, group_rank)
+);
