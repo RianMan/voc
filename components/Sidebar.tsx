@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  LayoutDashboard, Table2, Settings, FileText, Archive, Users, LogOut, Shield, Settings2, Eye,
+  LayoutDashboard, MessageSquare, Settings, FileText, Archive, Users, LogOut, Shield, Settings2, Eye,
   Coins, Tag, Layers, Target
 } from 'lucide-react';
 
@@ -15,7 +15,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView })
 
   const menuItems = [
     { id: 'dashboard', label: '概览', icon: LayoutDashboard, roles: ['admin', 'operator', 'viewer'] },
-    { id: 'reports', label: '问题处理', icon: Table2, roles: ['admin', 'operator', 'viewer'] },
+    { id: 'reports', label: '问题处理', icon: MessageSquare, roles: ['admin', 'operator', 'viewer'] },
     { id: 'archive', label: '报告存档', icon: Archive, roles: ['admin', 'operator', 'viewer'] },
     
     // === 高级功能 ===

@@ -297,6 +297,64 @@ async function analyzeSpecificMonth(year, month, options = {}) {
   return results;
 }
 
+async function runAnalysis(appId, year, month) {
+    // 1. 执行现有的 AI 聚类逻辑 (生成 Top N 个组)
+    console.log(`正在为 ${appId} 执行 AI 聚类...`);
+    await performAiClustering(appId, year, month); 
+
+    // 2. 紧接着调用“补漏”逻辑，处理剩下没被聚类的评论
+    console.log(`正在归纳未分类评论到“其他”...`);
+    await finalizeClustering(appId, year, month);
+}
+
+// 定义补漏函数 (核心逻辑)
+async function finalizeClustering(appId, year, month) {
+    // 找出该周期内所有的评论 ID
+    const [allReviews] = await pool.execute(
+        'SELECT id FROM voc_feedbacks WHERE app_id = ? AND YEAR(feedback_time) = ? AND MONTH(feedback_time) = ?',
+        [appId, year, month]
+    );
+    const allIds = allReviews.map(r => r.id);
+
+    // 找出已经分配了组的评论 ID
+    const [assignedGroups] = await pool.execute(
+        'SELECT review_ids FROM review_groups WHERE app_id = ? AND year = ? AND month = ?',
+        [appId, year, month]
+    );
+    
+    let assignedIds = [];
+    assignedGroups.forEach(g => {
+        const ids = typeof g.review_ids === 'string' ? JSON.parse(g.review_ids) : g.review_ids;
+        assignedIds = assignedIds.concat(ids);
+    });
+
+    // 计算差集：未归类的评论
+    const unassignedIds = allIds.filter(id => !assignedIds.includes(id));
+
+    if (unassignedIds.length > 0) {
+        // 计算当前最大的 Rank，把“其他”放在最后
+        const [maxRankRow] = await pool.execute(
+            'SELECT MAX(group_rank) as max_rank FROM review_groups WHERE app_id = ? AND year = ? AND month = ?',
+            [appId, year, month]
+        );
+        const nextRank = (maxRankRow[0].max_rank || 0) + 1;
+
+        // 插入或更新“其他问题”分组
+        await pool.execute(`
+            INSERT INTO review_groups 
+            (app_id, group_title, group_rank, review_count, percentage, year, month, review_ids, root_cause_summary, action_suggestion, processing_status)
+            VALUES (?, '其他待分类问题', ?, ?, ?, ?, ?, ?, 'AI 聚类未覆盖的零散反馈', '建议人工抽检或标记为无效', 'pending')
+            ON DUPLICATE KEY UPDATE 
+            review_count = VALUES(review_count), 
+            review_ids = VALUES(review_ids),
+            percentage = VALUES(percentage)
+        `, [
+            appId, nextRank, unassignedIds.length, 
+            ((unassignedIds.length / allIds.length) * 100).toFixed(2),
+            year, month, JSON.stringify(unassignedIds)
+        ]);
+    }
+}
 /**
  * 主函数
  */

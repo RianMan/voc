@@ -6,3 +6,4 @@ export * from './modules/reports';
 export * from './modules/topics';
 export * from './modules/clusters';
 export * from './modules/verifications';
+export * from './modules/groups';

@@ -88,57 +88,87 @@ router.get('/groups/:id', async (req, res) => {
  * GET /api/groups/:id/reviews
  * 获取分组下的所有评论详情
  */
+// voc-mysql/src/services/groupRoutes.js
+
+// 1. 修改获取评论详情接口，增加关键字和来源过滤
+/**
+ * GET /api/groups/:id/reviews
+ * 获取分组下的所有评论详情（支持关键字筛选、来源过滤、原文对照及跳转）
+ */
 router.get('/groups/:id/reviews', async (req, res) => {
   try {
     const { id } = req.params;
+    const { keyword, source } = req.query; // 获取前端传入的筛选参数
     
-    // 先获取分组的review_ids
-    const [groupRows] = await pool.execute(
-      'SELECT review_ids FROM review_groups WHERE id = ?',
-      [id]
-    );
+    // 1. 获取分组对应的评论 ID 列表
+    const [groupRows] = await pool.execute('SELECT review_ids FROM review_groups WHERE id = ?', [id]);
+    if (groupRows.length === 0) return res.status(404).json({ error: 'Group not found' });
     
-    if (groupRows.length === 0) {
-      return res.status(404).json({ error: 'Group not found' });
-    }
+    const reviewIds = typeof groupRows[0].review_ids === 'string' ? JSON.parse(groupRows[0].review_ids) : groupRows[0].review_ids;
+    if (reviewIds.length === 0) return res.json({ success: true, data: [] });
     
-    const reviewIds = typeof groupRows[0].review_ids === 'string' 
-      ? JSON.parse(groupRows[0].review_ids) 
-      : groupRows[0].review_ids;
-    
-    if (reviewIds.length === 0) {
-      return res.json({ success: true, data: [] });
-    }
-    
-    // 获取所有评论详情
-    const placeholders = reviewIds.map(() => '?').join(',');
-    const [reviews] = await pool.execute(`
+    // 2. 构建基础 SQL
+    // 确保查询了 f.source_url (用于GP跳转) 和 m.content/translated_content (用于原文翻译对照)
+    let sql = `
       SELECT 
-        f.id,
-        f.app_id as appId,
-        f.app_name as appName,
-        f.source,
-        f.source_url as sourceUrl,
-        f.country,
-        f.feedback_time as date,
-        m.original_content as text,
+        f.id, 
+        f.app_id as appId, 
+        f.source, 
+        f.source_url as sourceUrl, 
+        f.country, 
+        f.feedback_time as date, 
+        m.content as text, 
         m.translated_content as translated_text,
-        f.summary,
-        f.category,
-        f.risk_level,
-        f.status,
-        f.root_cause,
-        f.action_advice
+        f.category, 
+        f.risk_level, 
+        f.status
       FROM voc_feedbacks f
       LEFT JOIN voc_feedback_messages m ON f.id = m.feedback_id AND m.sequence_num = 1
-      WHERE f.id IN (${placeholders})
-      ORDER BY f.feedback_time DESC
-    `, reviewIds);
+      WHERE f.id IN (${reviewIds.map(() => '?').join(',')})
+    `;
+    const params = [...reviewIds];
+
+    // 3. 关键字筛选：支持搜索原文和翻译内容
+    if (keyword) {
+      sql += ` AND (m.content LIKE ? OR m.translated_content LIKE ?)`;
+      params.push(`%${keyword}%`, `%${keyword}%`);
+    }
+
+    // 4. 来源筛选：支持 Udesk 模糊匹配以覆盖所有在线/电话渠道
+    if (source) {
+      if (source.includes('udesk')) {
+        sql += ` AND f.source LIKE 'udesk%'`; // 匹配所有 udesk_chat, udesk_voice 等
+      } else {
+        sql += ` AND f.source = ?`;
+        params.push(source);
+      }
+    }
     
+    // 5. 按时间倒序排序
+    sql += ` ORDER BY f.feedback_time DESC`;
+    
+    const [reviews] = await pool.execute(sql, params);
+    
+    // 6. 返回数据
     res.json({ success: true, data: reviews });
   } catch (e) {
-    console.error('[Groups] Get reviews failed:', e);
+    console.error('[Groups] Get group reviews detail failed:', e);
     res.status(500).json({ error: 'Get group reviews failed' });
+  }
+});;
+
+// 2. 新增接口：更新聚类问题的处理状态和备注
+router.put('/groups/:id/processing', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, remark, operator } = req.body;
+    await pool.execute(
+      'UPDATE review_groups SET processing_status = ?, remark = ?, operator = ?, updated_at = NOW() WHERE id = ?',
+      [status, remark, operator, id]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Update processing status failed' });
   }
 });
 

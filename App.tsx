@@ -14,6 +14,7 @@ import { TopicManager } from './pages/TopicManager';
 import { ClusterAnalysis } from './pages/ClusterAnalysis';
 import { VerificationTracker } from './pages/VerificationTracker';
 import { Loader2, RefreshCw } from 'lucide-react';
+import { IssueHandler } from './pages/IssueHandler';
 
 const MainApp: React.FC = () => {
   const { user, loading: authLoading } = useAuth();
@@ -83,7 +84,7 @@ const MainApp: React.FC = () => {
       case 'dashboard':
         return <Dashboard data={data} />;
       case 'reports':
-        return <Reports />; 
+        return <IssueHandler />; 
       case 'archive':
         return <ReportArchive />;
       case 'costs':
