@@ -51,7 +51,10 @@ export const runWeeklyClustering = async () => {
   return res.json();
 };
 
-export const fetchClusterSummary = async (appId: string) => {
-  const res = await fetch(`${API_BASE}/clusters/summary/${appId}`);
+export const fetchClusterSummary = async (appId: string, month?: string) => {
+  const params = new URLSearchParams();
+  if (month) params.append('month', month);
+  
+  const res = await fetch(`${API_BASE}/clusters/summary/${appId}?${params}`);
   return res.json();
 };

@@ -583,12 +583,18 @@ export async function getVerificationHistory(configId) {
 export async function getVerificationSummary(appId) {
   const [configs] = await pool.execute(
     `SELECT vc.*, 
+       -- 获取最新验证结论
        (SELECT vr.conclusion FROM verification_results vr 
         WHERE vr.config_id = vc.id 
         ORDER BY vr.verify_date DESC LIMIT 1) as latest_conclusion,
        (SELECT vr.change_percent FROM verification_results vr 
         WHERE vr.config_id = vc.id 
-        ORDER BY vr.verify_date DESC LIMIT 1) as latest_change
+        ORDER BY vr.verify_date DESC LIMIT 1) as latest_change,
+       -- 👇 新增：获取聚类标题
+       (SELECT rg.group_title FROM review_groups rg 
+        WHERE rg.id = vc.issue_value 
+        AND vc.issue_type = 'cluster' 
+        LIMIT 1) as cluster_title
      FROM verification_configs vc 
      WHERE vc.app_id = ?
      ORDER BY vc.created_at DESC`,
@@ -602,6 +608,7 @@ export async function getVerificationSummary(appId) {
       id: c.id,
       issueType: c.issue_type,
       issueValue: c.issue_value,
+      clusterTitle: c.cluster_title || null,  // 👈 新增
       optimization: c.optimization_desc,
       status: c.status,
       latestConclusion: c.latest_conclusion,

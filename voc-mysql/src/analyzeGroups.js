@@ -235,7 +235,10 @@ async function analyzeCurrentMonth(options = {}) {
   for (const app of apps) {
     try {
       const result = await analyzeAppMonthGroups(app.app_id, year, month, options);
-      results.push({ appId: app.app_id, appName: app.app_name, ...result });
+      if (result.success) {
+        await finalizeClustering(app.app_id, year, month);
+      }
+      // results.push({ appId: app.app_id, appName: app.app_name, ...result });
     } catch (e) {
       console.error(`❌ ${app.app_id} 分析失败:`, e.message);
       results.push({ appId: app.app_id, success: false, error: e.message });
@@ -308,52 +311,87 @@ async function runAnalysis(appId, year, month) {
 }
 
 // 定义补漏函数 (核心逻辑)
+/**
+ * 补漏函数：将未聚类的评论归到"其他待分类问题"
+ */
 async function finalizeClustering(appId, year, month) {
-    // 找出该周期内所有的评论 ID
-    const [allReviews] = await pool.execute(
-        'SELECT id FROM voc_feedbacks WHERE app_id = ? AND YEAR(feedback_time) = ? AND MONTH(feedback_time) = ?',
-        [appId, year, month]
-    );
-    const allIds = allReviews.map(r => r.id);
-
-    // 找出已经分配了组的评论 ID
-    const [assignedGroups] = await pool.execute(
-        'SELECT review_ids FROM review_groups WHERE app_id = ? AND year = ? AND month = ?',
-        [appId, year, month]
-    );
-    
-    let assignedIds = [];
-    assignedGroups.forEach(g => {
-        const ids = typeof g.review_ids === 'string' ? JSON.parse(g.review_ids) : g.review_ids;
-        assignedIds = assignedIds.concat(ids);
-    });
-
-    // 计算差集：未归类的评论
-    const unassignedIds = allIds.filter(id => !assignedIds.includes(id));
-
-    if (unassignedIds.length > 0) {
-        // 计算当前最大的 Rank，把“其他”放在最后
-        const [maxRankRow] = await pool.execute(
-            'SELECT MAX(group_rank) as max_rank FROM review_groups WHERE app_id = ? AND year = ? AND month = ?',
-            [appId, year, month]
-        );
-        const nextRank = (maxRankRow[0].max_rank || 0) + 1;
-
-        // 插入或更新“其他问题”分组
-        await pool.execute(`
-            INSERT INTO review_groups 
-            (app_id, group_title, group_rank, review_count, percentage, year, month, review_ids, root_cause_summary, action_suggestion, processing_status)
-            VALUES (?, '其他待分类问题', ?, ?, ?, ?, ?, ?, 'AI 聚类未覆盖的零散反馈', '建议人工抽检或标记为无效', 'pending')
-            ON DUPLICATE KEY UPDATE 
-            review_count = VALUES(review_count), 
-            review_ids = VALUES(review_ids),
-            percentage = VALUES(percentage)
-        `, [
-            appId, nextRank, unassignedIds.length, 
-            ((unassignedIds.length / allIds.length) * 100).toFixed(2),
-            year, month, JSON.stringify(unassignedIds)
-        ]);
-    }
+  console.log(`  🔍 检查未聚类评论...`);
+  
+  // 1. 计算该月的起止日期
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0);
+  endDate.setHours(23, 59, 59, 999);
+  
+  const startStr = startDate.toISOString().split('T')[0];
+  const endStr = endDate.toISOString().split('T')[0];
+  
+  // 2. 获取该月所有符合条件的评论 ID
+  const [allReviews] = await pool.execute(`
+    SELECT id 
+    FROM voc_feedbacks 
+    WHERE app_id = ? 
+      AND process_status = 'analyzed'
+      AND risk_level IN ('High', 'Medium')
+      AND status IN ('pending', 'confirmed', 'reported', 'in_progress')
+      AND DATE(feedback_time) >= ?
+      AND DATE(feedback_time) <= ?
+  `, [appId, startStr, endStr]);
+  
+  const allIds = allReviews.map(r => r.id);
+  
+  if (allIds.length === 0) {
+    console.log(`  ⏭️  无符合条件的评论，跳过`);
+    return;
+  }
+  
+  // 3. 获取已分配到聚类的评论 ID
+  const [assignedGroups] = await pool.execute(`
+    SELECT review_ids 
+    FROM review_groups 
+    WHERE app_id = ? AND year = ? AND month = ?
+  `, [appId, year, month]);
+  
+  let assignedIds = [];
+  assignedGroups.forEach(g => {
+    const ids = typeof g.review_ids === 'string' ? JSON.parse(g.review_ids) : g.review_ids;
+    assignedIds = assignedIds.concat(ids);
+  });
+  
+  // 4. 计算差集：未归类的评论
+  const unassignedIds = allIds.filter(id => !assignedIds.includes(id));
+  
+  if (unassignedIds.length === 0) {
+    console.log(`  ✅ 所有评论已聚类 (${allIds.length}/${allIds.length})`);
+    return;
+  }
+  
+  console.log(`  📋 发现 ${unassignedIds.length} 条未聚类评论 (总数 ${allIds.length})`);
+  
+  // 5. 计算当前最大的 Rank，把"其他"放在最后
+  const [maxRankRow] = await pool.execute(`
+    SELECT MAX(group_rank) as max_rank 
+    FROM review_groups 
+    WHERE app_id = ? AND year = ? AND month = ?
+  `, [appId, year, month]);
+  
+  const nextRank = (maxRankRow[0].max_rank || 0) + 1;
+  const percentage = ((unassignedIds.length / allIds.length) * 100).toFixed(2);
+  
+  // 6. 插入"其他待分类问题"分组
+  await pool.execute(`
+    INSERT INTO review_groups 
+    (app_id, year, month, group_title, group_rank, review_count, percentage,
+     review_ids, root_cause_summary, action_suggestion, status)
+    VALUES (?, ?, ?, '其他待分类问题', ?, ?, ?, ?, 
+            'AI 聚类未覆盖的零散反馈', 
+            '建议人工抽检或标记为低优先级', 
+            'pending')
+  `, [
+    appId, year, month, nextRank, unassignedIds.length, percentage,
+    JSON.stringify(unassignedIds)
+  ]);
+  
+  console.log(`  ✅ 已归类到"其他待分类问题" (Rank ${nextRank}, ${percentage}%)\n`);
 }
 /**
  * 主函数

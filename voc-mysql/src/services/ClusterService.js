@@ -321,30 +321,47 @@ export async function getClusters(filters = {}) {
 /**
  * 获取最新一周的聚类摘要（用于周报）
  */
-export async function getLatestClusterSummary(appId) {
-  const { weekNumber, year } = getWeekInfo();
+export async function getLatestClusterSummary(appId, month) {
+  let year, monthNum;
   
-  const clusters = await getClusters({ appId, weekNumber, year });
+  if (month) {
+    // 👇 如果传入了月份（格式：2025-12）
+    [year, monthNum] = month.split('-').map(Number);
+  } else {
+    // 原逻辑：使用当前周
+    const { weekNumber, year: currentYear } = getWeekInfo();
+    year = currentYear;
+    // 这里需要改成当前月
+    monthNum = new Date().getMonth() + 1;
+  }
+  
+  // 👇 改成查询月度聚类数据（从 review_groups 表）
+  const [rows] = await pool.execute(`
+    SELECT * FROM review_groups 
+    WHERE app_id = ? AND year = ? AND month = ?
+    ORDER BY group_rank ASC
+  `, [appId, year, monthNum]);
   
   // 按分类分组
   const grouped = {};
-  clusters.forEach(c => {
-    if (!grouped[c.category]) {
-      grouped[c.category] = [];
+  rows.forEach(c => {
+    const category = c.auto_category || 'Other';
+    if (!grouped[category]) {
+      grouped[category] = [];
     }
-    grouped[c.category].push({
-      rank: c.cluster_rank,
-      title: c.cluster_title,
+    grouped[category].push({
+      rank: c.group_rank,
+      title: c.group_title,
       count: c.review_count,
-      percentage: c.percentage,
+      percentage: parseFloat(c.percentage),
       rootCause: c.root_cause_summary,
       suggestion: c.action_suggestion
     });
   });
   
   return {
-    weekNumber,
     year,
+    month: monthNum,
     byCategory: grouped
   };
 }

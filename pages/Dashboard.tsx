@@ -26,10 +26,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   const safeData = Array.isArray(data) ? data : [];
   
   const [selectedApp, setSelectedApp] = useState<string>('');
+
   const [clusterSummary, setClusterSummary] = useState<any>(null);
   const [verificationSummary, setVerificationSummary] = useState<any[]>([]);
   const [topicCount, setTopicCount] = useState<number>(0);
   const [loadingAdvanced, setLoadingAdvanced] = useState(false);
+
+  const generateMonthOptions = () => {
+    const months = [];
+    const now = new Date();
+    
+    for (let i = 0; i < 6; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const value = `${year}-${month}`;
+      const label = `${year}年${month}月`;
+      
+      months.push({ value, label });
+    }
+    
+    return months;
+  };
+
+  const getCurrentMonth = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  };
+
+  const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonth());
   
   // 新增：统计数据和趋势
   const [stats, setStats] = useState<any>(null);
@@ -50,13 +77,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       loadStats();
       loadTrend();
     }
-  }, [selectedApp]);
+  }, [selectedApp, selectedMonth]);
 
   const loadAdvancedData = async () => {
     setLoadingAdvanced(true);
     try {
       const [clusterRes, verifyRes, topicRes] = await Promise.all([
-        fetchClusterSummary(selectedApp).catch(() => ({ data: null })),
+        fetchClusterSummary(selectedApp, selectedMonth),  
         fetchVerificationSummary(selectedApp).catch(() => ({ data: [] })),
         fetchTopics({ appId: selectedApp, isActive: true }).catch(() => ({ data: [] }))
       ]);
@@ -73,7 +100,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   const loadStats = async () => {
     setLoadingStats(true);
     try {
-      const result = await fetchVocStats(selectedApp);
+      const result = await fetchVocStats(selectedApp, selectedMonth);
       if (result.success) {
         setStats(result.data);
       }
@@ -86,13 +113,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
 
   const loadTrend = async () => {
     try {
-      const result = await fetchVocTrend(selectedApp, 8);
+      const result = await fetchVocTrend(selectedApp, selectedMonth, 8);
       if (result.success) {
-        setTrendData(result.data.map((item: any) => ({
-          week: `W${item.week}`,
-          好评率: parseFloat(((item.positive / item.total) * 100).toFixed(1)),
-          差评率: parseFloat(((item.negative / item.total) * 100).toFixed(1)),
-        })));
+        const formatted = result.data.map((item: any) => {
+          // 👇 判断是按周还是按天
+          const label = selectedMonth 
+            ? `${item.week}日`  // 按月时显示"1日、2日..."
+            : `W${item.week}`;  // 全局时显示"W40、W41..."
+          
+          return {
+            week: label,
+            好评率: parseFloat(((item.positive / item.total) * 100).toFixed(1)),
+            差评率: parseFloat(((item.negative / item.total) * 100).toFixed(1)),
+          };
+        });
+        setTrendData(formatted);
       }
     } catch (e) {
       console.error('Load trend failed', e);
@@ -152,6 +187,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
               </option>
             ))}
           </select>
+
+           <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
+            >
+               {generateMonthOptions().map(opt => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+            </select>
           <span className="text-sm text-slate-500">实时分析统计</span>
         </div>
       </div>
@@ -215,17 +262,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
             </div>
           ) : verificationSummary.length > 0 ? (
             <div className="space-y-2">
-              {verificationSummary.slice(0, 4).map((v: any, i: number) => (
-                <div key={i} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
-                  <span className="text-sm text-slate-700 truncate flex-1">{v.issueValue}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded
-                    ${v.status === 'resolved' ? 'bg-green-50 text-green-700' :
-                      v.status === 'worsened' ? 'bg-red-50 text-red-700' :
-                      'bg-blue-50 text-blue-700'}`}>
-                    {v.conclusionText || v.status}
-                  </span>
-                </div>
-              ))}
+              {verificationSummary.slice(0, 4).map((v: any, i: number) => {
+                  let displayTitle = v.issueValue;
+                  if (v.issueType === 'cluster' && v.clusterTitle) {
+                    displayTitle = v.clusterTitle;  // 使用聚类标题
+                  }
+                  
+                  return (
+                    <div key={i} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
+                      <span className="text-sm text-slate-700 truncate flex-1">{displayTitle}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded
+                        ${v.status === 'resolved' ? 'bg-green-50 text-green-700' :
+                          v.status === 'worsened' ? 'bg-red-50 text-red-700' :
+                          'bg-blue-50 text-blue-700'}`}>
+                        {v.conclusionText || v.status}
+                      </span>
+                    </div>
+                  );
+                })}
             </div>
           ) : (
             <p className="text-sm text-slate-400 py-4 text-center">暂无验证配置</p>
@@ -269,6 +323,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
           <h3 className="text-lg font-semibold text-slate-800 mb-6">问题分类分布</h3>
+           {selectedApp && (
+            <p className="text-xs text-slate-400 mb-4">📱 {getAppName(selectedApp)}</p>
+          )}
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -293,6 +350,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
 
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
           <h3 className="text-lg font-semibold text-slate-800 mb-6">好评/差评趋势（近8周）</h3>
+          {selectedApp && (
+            <p className="text-xs text-slate-400 mb-4">📱 {getAppName(selectedApp)}</p>
+          )}
           <div className="h-[300px] w-full">
             {trendData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
