@@ -12,6 +12,7 @@ im-query-mock
 node_modules
 dist
 dist-ssr
+voc-mysql/data
 *.local
 # Editor directories and files
 .vscode/*
