@@ -1,33 +1,54 @@
 /**
  * WeeklyReportService.js
- * 功能4: 周度自动报告
- * 
- * 整合功能1-3的结果，生成结构化周报
+ * 新版本：基于 voc_feedbacks 实时数据生成周维度报告
  */
 
-import pool from '../db/index.js';
-import { recordAICost } from '../db/index.js';
-import { loadAllReports, filterData } from './dataLoader.js';
-import { getLatestClusterSummary } from './ClusterService.js';
-import { getVerificationSummary } from './VerificationService.js';
-import { getTopicAnalysisHistory, getTopics } from './TopicService.js';
-import { getStatusBatch, saveReport, getLastReport, ACTIVE_STATUSES } from '../db/index.js';
 import OpenAI from 'openai';
+import pool from '../db/index.js';
+import { recordAICost, saveReport } from '../db/index.js';
 
+// AI Client
 let aiClient = null;
 
 function getAIClient() {
   if (!aiClient) {
-    const apiKey = process.env.TONGYI_API_KEY || process.env.DEEPSEEK_API_KEY;
-    const baseURL = process.env.TONGYI_API_KEY 
-      ? 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-      : (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com');
+    const apiKey = process.env.TONGYI_API_KEY;
+    const baseURL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
     aiClient = new OpenAI({ apiKey, baseURL });
   }
   return aiClient;
 }
 
-function getWeekInfo(date = new Date()) {
+/**
+ * 获取周范围
+ * @param {number} weekOffset - 周偏移（0=本周，-1=上周）
+ */
+function getWeekRange(weekOffset = 0) {
+  const now = new Date();
+  const dayOfWeek = now.getDay() || 7; // 周日=7
+  
+  // 本周一
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - dayOfWeek + 1 + (weekOffset * 7));
+  monday.setHours(0, 0, 0, 0);
+  
+  // 本周日
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  
+  return {
+    start: monday.toISOString().split('T')[0],
+    end: sunday.toISOString().split('T')[0],
+    startDate: monday,
+    endDate: sunday
+  };
+}
+
+/**
+ * 获取周数
+ */
+function getWeekNumber(date = new Date()) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
@@ -37,289 +58,339 @@ function getWeekInfo(date = new Date()) {
 }
 
 /**
- * 收集周报所需的所有数据
+ * 获取指定周的数据
  */
-async function collectReportData(appId) {
-  const { weekNumber, year } = getWeekInfo();
-  const now = new Date();
-  const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+async function fetchWeekData(appId, start, end) {
+  const [rows] = await pool.execute(`
+    SELECT 
+      f.id, f.app_id, f.app_name, f.country,
+      f.category, f.risk_level, f.status,
+      f.summary, f.root_cause, f.action_advice,
+      f.feedback_time as date,
+      m.translated_content as text
+    FROM voc_feedbacks f
+    LEFT JOIN voc_feedback_messages m ON f.id = m.feedback_id AND m.sequence_num = 1
+    WHERE f.app_id = ?
+      AND f.process_status = 'analyzed'
+      AND DATE(f.feedback_time) >= ?
+      AND DATE(f.feedback_time) <= ?
+    ORDER BY f.feedback_time DESC
+  `, [appId, start, end]);
   
-  // 1. 加载基础数据
-  const result = await loadAllReports();
-  let allData = result.data.filter(item => item.appId === appId);
-  const allIds = allData.map(d => d.id).filter(Boolean);
-  const statusMap = await getStatusBatch(allIds);
-  
-  allData = allData.map(item => ({
-    ...item,
-    status: statusMap[item.id]?.status || 'pending'
-  }));
-  
-  // 2. 基础统计
-  const activeItems = allData.filter(item => ACTIVE_STATUSES.includes(item.status));
-  const newThisWeek = activeItems.filter(item => new Date(item.date) >= oneWeekAgo);
-  const resolvedItems = allData.filter(item => item.status === 'resolved');
-  
-  // 按分类统计
-  const categoryStats = {};
-  activeItems.forEach(item => {
-    const cat = item.category || 'Other';
-    categoryStats[cat] = (categoryStats[cat] || 0) + 1;
-  });
-  
-  // 按风险统计
-  const riskStats = { High: 0, Medium: 0, Low: 0 };
-  activeItems.forEach(item => {
-    const risk = item.risk_level || 'Medium';
-    if (riskStats[risk] !== undefined) riskStats[risk]++;
-  });
-  
-  // 3. 获取聚类结果
-  const clusterSummary = await getLatestClusterSummary(appId);
-  
-  // 4. 获取专题追踪结果
-  const topics = await getTopics({ appId, isActive: true });
-  const topicResults = [];
-  for (const topic of topics.slice(0, 5)) {
-    const history = await getTopicAnalysisHistory(topic.id, 1);
-    if (history.length > 0) {
-      topicResults.push({
-        name: topic.name,
-        totalMatches: history[0].total_matches,
-        sentiment: {
-          positive: history[0].sentiment_positive,
-          negative: history[0].sentiment_negative,
-          neutral: history[0].sentiment_neutral
-        },
-        summary: history[0].ai_summary,
-        painPoints: history[0].pain_points
-      });
-    }
-  }
-  
-  // 5. 获取闭环验证结果
-  const verificationResults = await getVerificationSummary(appId);
-  
-  // 6. 获取上周对比
-  const lastReport = await getLastReport(appId);
-  let weekComparison = null;
-  if (lastReport) {
-    weekComparison = {
-      lastPending: lastReport.pending_issues,
-      lastNew: lastReport.new_issues,
-      lastResolved: lastReport.resolved_issues,
-      changePercent: lastReport.pending_issues > 0 
-        ? Math.round(((activeItems.length - lastReport.pending_issues) / lastReport.pending_issues) * 100)
-        : 0
-    };
-  }
-  
-  return {
-    weekNumber,
-    year,
-    overview: {
-      totalActive: activeItems.length,
-      newThisWeek: newThisWeek.length,
-      resolved: resolvedItems.length,
-      categoryStats,
-      riskStats
-    },
-    clusters: clusterSummary,
-    topics: topicResults,
-    verifications: verificationResults,
-    comparison: weekComparison,
-    highPriorityItems: activeItems
-      .filter(item => item.risk_level === 'High')
-      .slice(0, 10)
-      .map(item => ({
-        summary: item.summary,
-        category: item.category,
-        rootCause: item.root_cause,
-        suggestion: item.action_advice
-      }))
-  };
+  return rows;
 }
 
 /**
- * 生成结构化周报 JSON
+ * AI 临时聚类（不保存数据库）
  */
-export async function generateStructuredReport(appId, user = null) {
-  const data = await collectReportData(appId);
-  const result = await loadAllReports();
-  const appInfo = result.data.find(d => d.appId === appId);
-  const appName = appInfo?.appName || appId;
+async function aiWeeklyClustering(reviews) {
+  if (reviews.length < 3) {
+    return { clusters: [], message: '数据量不足，无法聚类' };
+  }
   
-  // 构建结构化报告
-  const structuredReport = {
-    meta: {
-      appId,
-      appName,
-      weekNumber: data.weekNumber,
-      year: data.year,
-      generatedAt: new Date().toISOString(),
-      generatedBy: user?.display_name || user?.username || 'system'
-    },
-    
-    // 1. 概览
-    overview: {
-      totalActive: data.overview.totalActive,
-      newThisWeek: data.overview.newThisWeek,
-      resolved: data.overview.resolved,
-      riskDistribution: data.overview.riskStats,
-      categoryDistribution: data.overview.categoryStats,
-      weekOverWeek: data.comparison ? {
-        pendingChange: data.overview.totalActive - data.comparison.lastPending,
-        changePercent: data.comparison.changePercent,
-        trend: data.comparison.changePercent > 10 ? 'worsening' : 
-               data.comparison.changePercent < -10 ? 'improving' : 'stable'
-      } : null
-    },
-    
-    // 2. Top 痛点榜（聚类结果）
-    topPainPoints: data.clusters?.byCategory || {},
-    
-    // 3. 专题追踪
-    topicTracking: data.topics.map(t => ({
-      name: t.name,
-      matches: t.totalMatches,
-      sentimentSummary: t.sentiment.positive > t.sentiment.negative 
-        ? `正面 ${Math.round(t.sentiment.positive / (t.totalMatches || 1) * 100)}%`
-        : `负面 ${Math.round(t.sentiment.negative / (t.totalMatches || 1) * 100)}%`,
-      summary: t.summary
-    })),
-    
-    // 4. 闭环验证结果
-    verificationResults: data.verifications.map(v => ({
-      issue: v.issueValue,
-      optimization: v.optimization,
-      result: v.conclusionText,
-      status: v.status
-    })),
-    
-    // 5. 高优先级问题
-    highPriorityIssues: data.highPriorityItems
-  };
+  // 只聚类高风险和中风险的问题
+  const targetReviews = reviews.filter(r => 
+    ['High', 'Medium'].includes(r.risk_level) && 
+    !['Positive', 'User_Error'].includes(r.category)
+  );
   
-  return structuredReport;
-}
-
-/**
- * 生成 AI 总结的周报（Markdown 格式）
- */
-export async function generateAIWeeklyReport(appId, user = null) {
-  const structuredData = await generateStructuredReport(appId, user);
+  if (targetReviews.length < 3) {
+    return { clusters: [], message: '关键问题数量不足' };
+  }
   
   const client = getAIClient();
-  const isQwen = !!process.env.TONGYI_API_KEY;
-  const model = isQwen ? 'qwen3-max' : 'deepseek-chat';
   
-  const prompt = `你是金融科技产品运营专家，请基于以下结构化数据生成一份简洁、可执行的周报。
+  const prompt = `你是产品专家。请将以下 ${targetReviews.length} 条用户反馈聚类成 Top 5 核心问题。
 
-## 数据
-${JSON.stringify(structuredData, null, 2)}
+## 输入数据
+${JSON.stringify(targetReviews.slice(0, 100).map(r => ({
+  summary: r.summary,
+  root_cause: r.root_cause,
+  category: r.category,
+  status: r.status
+})), null, 2)}
 
-## 报告要求
-1. **不要写标题和时间**（系统会自动添加）
-2. 使用 Markdown 格式，禁止表格
-3. 结构如下：
-   - 📊 本周概览（3-5个关键指标）
-   - 🔥 Top 痛点榜（引用聚类结果，每个痛点1-2行）
-   - 📌 专题追踪（引用专题分析，简洁）
-   - ✅ 闭环验证（引用验证结果）
-   - 💡 下周行动建议（3-5条可执行建议）
+## 要求
+1. 只返回最核心的 3-5 个问题（不要强行凑数）
+2. 每个问题必须包含：标题、根因、建议、优先级、处理状态分布
+3. 优先级规则：
+   - P0：影响核心功能、有法律风险
+   - P1：影响用户体验、需本周解决
+   - P2：体验优化、可排期
 
-## 风格
-- 直接、简洁
-- 用数据说话
-- 给出具体可执行的建议`;
+## 输出JSON
+{
+  "clusters": [
+    {
+      "rank": 1,
+      "title": "问题标题（8字以内）",
+      "count": 涉及评论数,
+      "percentage": 占比（数字，不带%）,
+      "root_cause": "根本原因（1句话）",
+      "suggestion": "解决方案（具体可执行）",
+      "priority": "P0/P1/P2",
+      "status_distribution": "X条待处理，Y条处理中，Z条已解决"
+    }
+  ]
+}`;
 
   const completion = await client.chat.completions.create({
-    model,
+    model: 'qwen-max',
     max_tokens: 3000,
-    temperature: 0.3,
+    temperature: 0.2,
+    response_format: { type: 'json_object' },
     messages: [
-      { role: 'system', content: '你是VOC周报专家，生成简洁可执行的周报。用中文回复。' },
+      { role: 'system', content: '你是VOC分析专家，擅长提炼核心问题。用中文回复。' },
       { role: 'user', content: prompt }
     ]
   });
 
   if (completion.usage) {
-    await recordAICost(isQwen ? 'qwen' : 'deepseek', model, 'weekly_report', completion.usage);
+    await recordAICost('qwen', 'qwen-max', 'weekly_clustering', completion.usage);
   }
 
-  let report = completion.choices[0].message.content.trim();
+  try {
+    const result = JSON.parse(completion.choices[0].message.content);
+    return result;
+  } catch (e) {
+    console.error('[WeeklyReport] AI返回解析失败:', e);
+    return { clusters: [], error: e.message };
+  }
+}
+
+/**
+ * 周对比分析
+ */
+function compareWeeks(thisWeek, lastWeek) {
+  const calcChange = (curr, prev) => {
+    if (prev === 0) return curr > 0 ? 100 : 0;
+    return ((curr - prev) / prev * 100).toFixed(1);
+  };
   
-  // 添加标题
-  const title = `${structuredData.meta.appName} GP VOC 周报 ${structuredData.meta.year} W${structuredData.meta.weekNumber}`;
-  report = `# ${title}\n\n${report}`;
+  const thisCategories = {
+    Tech_Bug: thisWeek.filter(r => r.category === 'Tech_Bug').length,
+    Compliance_Risk: thisWeek.filter(r => r.category === 'Compliance_Risk').length,
+    Product_Issue: thisWeek.filter(r => r.category === 'Product_Issue').length
+  };
   
-  // 添加生成信息
-  const currentDate = new Date().toLocaleDateString('zh-CN', {
-    year: 'numeric', month: 'long', day: 'numeric'
-  });
-  report += `\n\n---\n*报告生成时间：${currentDate} | 生成人：${structuredData.meta.generatedBy}*`;
+  const lastCategories = {
+    Tech_Bug: lastWeek.filter(r => r.category === 'Tech_Bug').length,
+    Compliance_Risk: lastWeek.filter(r => r.category === 'Compliance_Risk').length,
+    Product_Issue: lastWeek.filter(r => r.category === 'Product_Issue').length
+  };
   
-  // 保存到数据库
-  await saveReport({
-    appId,
-    appName: structuredData.meta.appName,
-    reportType: 'weekly',
-    weekNumber: structuredData.meta.weekNumber,
-    year: structuredData.meta.year,
-    title,
-    content: report,
-    summaryStats: structuredData.overview.categoryDistribution,
-    comparedWithLast: structuredData.overview.weekOverWeek,
-    totalIssues: structuredData.overview.totalActive + structuredData.overview.resolved,
-    newIssues: structuredData.overview.newThisWeek,
-    resolvedIssues: structuredData.overview.resolved,
-    pendingIssues: structuredData.overview.totalActive,
-    // 新增字段
-    clusterSummary: JSON.stringify(structuredData.topPainPoints),
-    topicSummary: JSON.stringify(structuredData.topicTracking),
-    verificationSummary: JSON.stringify(structuredData.verificationResults)
-  }, user);
+  const thisHigh = thisWeek.filter(r => r.risk_level === 'High').length;
+  const lastHigh = lastWeek.filter(r => r.risk_level === 'High').length;
   
   return {
-    success: true,
-    report,
-    structured: structuredData,
-    meta: structuredData.meta
+    totalChange: calcChange(thisWeek.length, lastWeek.length),
+    categoryChanges: {
+      Tech_Bug: calcChange(thisCategories.Tech_Bug, lastCategories.Tech_Bug),
+      Compliance_Risk: calcChange(thisCategories.Compliance_Risk, lastCategories.Compliance_Risk),
+      Product_Issue: calcChange(thisCategories.Product_Issue, lastCategories.Product_Issue)
+    },
+    highRiskChange: calcChange(thisHigh, lastHigh),
+    thisWeekStats: {
+      total: thisWeek.length,
+      high: thisHigh,
+      categories: thisCategories
+    },
+    lastWeekStats: {
+      total: lastWeek.length,
+      high: lastHigh,
+      categories: lastCategories
+    }
   };
 }
 
 /**
- * 定时任务入口：生成所有 App 的周报
+ * 查询本周已解决的问题
  */
-export async function generateAllWeeklyReports(user = null) {
-  const result = await loadAllReports();
-  const allData = result.data;
-  const appIds = [...new Set(allData.map(d => d.appId).filter(Boolean))];
+async function getResolvedThisWeek(appId, start, end) {
+  const [rows] = await pool.execute(`
+    SELECT 
+      f.summary,
+      f.status,
+      f.assignee as operator,
+      f.note as remark,
+      f.updated_at
+    FROM voc_feedbacks f
+    WHERE f.app_id = ?
+      AND f.status = 'resolved'
+      AND DATE(f.updated_at) >= ?
+      AND DATE(f.updated_at) <= ?
+    ORDER BY f.updated_at DESC
+    LIMIT 10
+  `, [appId, start, end]);
   
-  const results = [];
+  return rows;
+}
+
+/**
+ * 生成报告文本
+ */
+async function generateReportText(data) {
+  const client = getAIClient();
   
-  for (const appId of appIds) {
-    try {
-      console.log(`[WeeklyReport] 生成 ${appId}...`);
-      const result = await generateAIWeeklyReport(appId, user);
-      results.push({ appId, success: true, ...result.meta });
-    } catch (e) {
-      console.error(`[WeeklyReport] ${appId} 失败:`, e.message);
-      results.push({ appId, success: false, error: e.message });
-    }
+  const { appName, weekNumber, year, overview, clusters, comparison, resolved } = data;
+  
+  const prompt = `你是产品运营专家。请基于以下数据生成本周VOC周报。
+
+## 基础数据
+- App：${appName}
+- 周次：${year}年第${weekNumber}周
+- 本周总反馈：${overview.total}条
+- 高风险：${overview.high}条（${(overview.high/overview.total*100).toFixed(1)}%）
+- 已处理：${overview.processed}条
+
+## 对比数据
+${JSON.stringify(comparison, null, 2)}
+
+## Top 问题聚类
+${JSON.stringify(clusters, null, 2)}
+
+## 本周已解决
+${JSON.stringify(resolved.slice(0, 5), null, 2)}
+
+## 要求
+1. **不要写标题**（系统自动生成）
+2. **结构**：
+   - 📊 本周概览（3-5个核心指标，必须包含环比对比）
+   - 🔥 Top问题（每个问题：标题+根因+方案+优先级+处理状态）
+   - ✅ 已解决问题（列表，简洁）
+   - 📈 趋势洞察（1-2句话，点出关键变化）
+   - 🎯 下周行动建议（3条，按P0/P1/P2排序）
+
+3. **风格**：
+   - 简洁：每个问题控制在3行内
+   - 数据驱动：多用数字和对比
+   - 行动导向：建议要具体可执行
+   - 禁止流水账
+
+请生成报告正文。`;
+
+  const completion = await client.chat.completions.create({
+    model: 'qwen-max',
+    max_tokens: 4000,
+    temperature: 0.3,
+    messages: [
+      { role: 'system', content: '你是VOC周报专家，生成简洁可执行的周报。' },
+      { role: 'user', content: prompt }
+    ]
+  });
+
+  if (completion.usage) {
+    await recordAICost('qwen', 'qwen-max', 'weekly_report', completion.usage);
+  }
+
+  return completion.choices[0].message.content.trim();
+}
+
+/**
+ * 主函数：生成周报
+ */
+export async function generateWeeklyReport(appId, options = {}, user = null) {
+  const { weekOffset = 0 } = options;
+  
+  console.log(`[WeeklyReport] 开始生成 ${appId} 周报 (weekOffset=${weekOffset})`);
+  
+  // 1. 计算周范围
+  const thisWeek = getWeekRange(weekOffset);
+  const lastWeek = getWeekRange(weekOffset - 1);
+  const { weekNumber, year } = getWeekNumber(thisWeek.startDate);
+  
+  console.log(`[WeeklyReport] 时间范围: ${thisWeek.start} ~ ${thisWeek.end}`);
+  
+  // 2. 获取数据
+  const [thisWeekData, lastWeekData] = await Promise.all([
+    fetchWeekData(appId, thisWeek.start, thisWeek.end),
+    fetchWeekData(appId, lastWeek.start, lastWeek.end)
+  ]);
+  
+  console.log(`[WeeklyReport] 本周数据: ${thisWeekData.length}条，上周: ${lastWeekData.length}条`);
+  
+  if (thisWeekData.length === 0) {
+    return {
+      success: false,
+      error: '本周无数据',
+      message: `${thisWeek.start} ~ ${thisWeek.end} 期间无评论数据`
+    };
   }
   
+  // 3. 数据分析
+  const overview = {
+    total: thisWeekData.length,
+    high: thisWeekData.filter(d => d.risk_level === 'High').length,
+    processed: thisWeekData.filter(d => d.status !== 'pending').length,
+    categories: {
+      Tech_Bug: thisWeekData.filter(r => r.category === 'Tech_Bug').length,
+      Compliance_Risk: thisWeekData.filter(r => r.category === 'Compliance_Risk').length,
+      Product_Issue: thisWeekData.filter(r => r.category === 'Product_Issue').length
+    }
+  };
+  
+  // 4. AI 聚类
+  console.log('[WeeklyReport] 开始AI聚类...');
+  const clusterResult = await aiWeeklyClustering(thisWeekData);
+  
+  // 5. 周对比
+  const comparison = compareWeeks(thisWeekData, lastWeekData);
+  
+  // 6. 已解决问题
+  const resolved = await getResolvedThisWeek(appId, thisWeek.start, thisWeek.end);
+  
+  // 7. 生成报告文本
+  console.log('[WeeklyReport] 生成报告文本...');
+  const reportBody = await generateReportText({
+    appId,
+    appName: thisWeekData[0]?.app_name || appId,
+    weekNumber,
+    year,
+    overview,
+    clusters: clusterResult.clusters || [],
+    comparison,
+    resolved
+  });
+  
+  // 8. 拼接完整报告
+  const appName = thisWeekData[0]?.app_name || appId;
+  const title = `${appName} VOC 周报 ${year}年第${weekNumber}周`;
+  const fullReport = `# ${title}\n\n${reportBody}\n\n---\n*生成时间：${new Date().toLocaleString('zh-CN')} | 生成人：${user?.display_name || user?.username || 'System'}*`;
+  
+  // 9. 保存到数据库
+  await saveReport({
+    appId,
+    appName,
+    reportType: 'weekly',
+    weekNumber,
+    year,
+    title,
+    content: fullReport,
+    summaryStats: overview.categories,
+    comparedWithLast: comparison,
+    totalIssues: overview.total,
+    newIssues: overview.total,
+    resolvedIssues: resolved.length,
+    pendingIssues: overview.total - overview.processed,
+    clusterSummary: JSON.stringify(clusterResult.clusters || []),
+    actionItems: JSON.stringify([]) // 可以后续从AI结果中提取
+  }, user);
+  
+  console.log('[WeeklyReport] 报告生成完成');
+  
   return {
-    total: appIds.length,
-    success: results.filter(r => r.success).length,
-    failed: results.filter(r => !r.success).length,
-    results
+    success: true,
+    report: fullReport,
+    meta: {
+      appId,
+      appName,
+      weekNumber,
+      year,
+      dateRange: `${thisWeek.start} ~ ${thisWeek.end}`,
+      totalAnalyzed: overview.total,
+      clustersFound: clusterResult.clusters?.length || 0
+    }
   };
 }
 
-export default {
-  collectReportData,
-  generateStructuredReport,
-  generateAIWeeklyReport,
-  generateAllWeeklyReports
-};
+export default { generateWeeklyReport };

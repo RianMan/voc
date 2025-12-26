@@ -2,12 +2,30 @@
 import React, { useState, useEffect } from 'react';
 import { 
   ChevronRight, ArrowLeft, MessageSquare, AlertCircle, 
-  Loader2, LayoutGrid, FileText, ExternalLink, Search, Filter, Settings2 
+  Loader2, LayoutGrid, FileText, ExternalLink, Search, Filter, Settings2 ,X
 } from 'lucide-react';
-import { fetchApps } from '../services/api';
+import { fetchApps, generateWeeklyReport } from '../services/api';
 import { formatDate } from '../tools';
 
 const API_BASE = '/api';
+
+function parseMarkdown(md: string): string {
+  return md
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/^#### (.+)$/gm, '<h4 class="text-base font-semibold mt-4 mb-2">$1</h4>')
+    .replace(/^### (.+)$/gm, '<h3 class="text-base font-semibold mt-4 mb-2">$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2 class="text-lg font-bold mt-6 mb-3 text-slate-800">$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1 class="text-xl font-bold mt-4 mb-4 text-slate-900 border-b pb-2">$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code class="bg-slate-100 px-1 py-0.5 rounded text-sm">$1</code>')
+    .replace(/^[-*] (.+)$/gm, '<li class="ml-4">$1</li>')
+    .replace(/^---$/gm, '<hr class="my-4 border-slate-200">')
+    .replace(/^(?!<[hlo]|<li|<hr)(.+)$/gm, '<p class="my-2 text-slate-600">$1</p>')
+    .replace(/(<li.*<\/li>\n?)+/g, '<ul class="list-disc space-y-1 my-2">$&</ul>');
+}
 
 export const IssueHandler: React.FC = () => {
   const [view, setView] = useState<'list' | 'detail'>('list');
@@ -16,6 +34,11 @@ export const IssueHandler: React.FC = () => {
   const [selectedGroup, setSelectedGroup] = useState<any>(null);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [reportContent, setReportContent] = useState<string | null>(null);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportMeta, setReportMeta] = useState<any>(null);
   
   // 筛选与搜索状态
   const [filters, setFilters] = useState({ appId: '', year: 2025, month: 12 });
@@ -71,6 +94,30 @@ export const IssueHandler: React.FC = () => {
     loadGroups();
   };
 
+  const handleGenerateWeeklyReport = async () => {
+      if (!filters.appId) {
+        alert('请先选择一个App');
+        return;
+      }
+      
+      setGeneratingReport(true);
+      try {
+        const data = await generateWeeklyReport(filters.appId, 0);
+        
+        if (data.success) {
+          setReportContent(data.report);
+          setReportMeta(data.meta);
+          setShowReportModal(true);
+        } else {
+          alert('生成失败');
+        }
+      } catch (e) {
+        alert('生成失败，请重试');
+      } finally {
+        setGeneratingReport(false);
+      }
+    };
+
   const handleEnterDetail = async (group: any) => {
     setLoading(true);
     setSelectedGroup(group);
@@ -97,7 +144,19 @@ export const IssueHandler: React.FC = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-slate-800">问题治理中心</h2>
-        <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm"><FileText size={18} /> 生成治理周报</button>
+        <button 
+          onClick={handleGenerateWeeklyReport}
+          disabled={generatingReport || !filters.appId}  // ✅ 使用 filters.appId
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
+        >
+          {generatingReport ? (
+            <Loader2 size={18} className="animate-spin" />
+          ) : (
+            <FileText size={18} />
+          )}
+          {generatingReport ? '生成中...' : '生成本周周报'}
+        </button>
+        {/* <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm"><FileText size={18} /> 生成治理周报</button> */}
       </div>
 
       <div className="bg-white p-4 rounded-xl border flex gap-4 shadow-sm items-center">
@@ -167,6 +226,46 @@ export const IssueHandler: React.FC = () => {
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg"
                 >保存</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReportModal && reportContent && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b">
+              <div>
+                <h3 className="text-lg font-bold">{reportMeta?.appName} 周报</h3>
+                <p className="text-sm text-slate-500">
+                  {reportMeta?.year}年第{reportMeta?.weekNumber}周 · {reportMeta?.dateRange}
+                </p>
+              </div>
+              <button onClick={() => setShowReportModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6">
+              <div 
+                className="prose prose-slate prose-sm max-w-none"
+                dangerouslySetInnerHTML={{ __html: parseMarkdown(reportContent) }} 
+              />
+            </div>
+            
+            <div className="p-4 border-t flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(reportContent);
+                  alert('已复制到剪贴板');
+                }}
+                className="px-4 py-2 text-sm bg-slate-100 hover:bg-slate-200 rounded-lg"
+              >
+                复制
+              </button>
+              <button onClick={() => setShowReportModal(false)} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg">
+                关闭
+              </button>
             </div>
           </div>
         </div>

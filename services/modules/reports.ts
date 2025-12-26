@@ -12,6 +12,14 @@ export interface ReportFilters {
   endDate?: string;
 }
 
+// ========== Apps ==========
+export async function fetchApps(): Promise<{ success: boolean; data: AppInfo[] }> {
+  const res = await fetch(`${API_BASE}/apps`);
+  if (!res.ok) throw new Error('Get apps failed');
+  return res.json();
+}
+
+// ========== 月度报告（保留，可能还在用） ==========
 export async function generateReport(filters: ReportFilters = {}, limit = 100): Promise<{
   success: boolean;
   report: string;
@@ -27,12 +35,6 @@ export async function generateReport(filters: ReportFilters = {}, limit = 100): 
     if (res.status === 403) throw new Error('仅管理员可生成报告');
     throw new Error('Report generation failed');
   }
-  return res.json();
-}
-
-export async function fetchApps(): Promise<{ success: boolean; data: AppInfo[] }> {
-  const res = await fetch(`${API_BASE}/apps`);
-  if (!res.ok) throw new Error('Get apps failed');
   return res.json();
 }
 
@@ -71,6 +73,7 @@ export async function generateAllReports(): Promise<{
   return res.json();
 }
 
+// ========== 报告列表 ==========
 export async function fetchReports(appId?: string, limit = 50): Promise<{ success: boolean; data: Report[] }> {
   const query = new URLSearchParams();
   if (appId) query.set('appId', appId);
@@ -87,23 +90,28 @@ export async function fetchReportDetail(id: number): Promise<{ success: boolean;
   return res.json();
 }
 
-export const generateWeeklyReport = async (appId: string) => {
-  const res = await fetch(`${API_BASE}/weekly-report/generate/${appId}`, {
+// ========== 周报（新增） ==========
+export async function generateWeeklyReport(appId: string, weekOffset = 0): Promise<{
+  success: boolean;
+  report: string;
+  meta: {
+    appId: string;
+    appName: string;
+    weekNumber: number;
+    year: number;
+    dateRange: string;
+    totalAnalyzed: number;
+    clustersFound: number;
+  };
+}> {
+  const res = await authFetch(`${API_BASE}/weekly-report/generate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('voc_token')}` }
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ appId, weekOffset })
   });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('请先登录');
+    throw new Error('Weekly report generation failed');
+  }
   return res.json();
-};
-
-export const generateAllWeeklyReports = async () => {
-  const res = await fetch(`${API_BASE}/weekly-report/generate-all`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('voc_token')}` }
-  });
-  return res.json();
-};
-
-export const fetchStructuredReport = async (appId: string) => {
-  const res = await fetch(`${API_BASE}/weekly-report/structured/${appId}`);
-  return res.json();
-};
+}
