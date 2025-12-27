@@ -5,13 +5,11 @@ import { recordAICost } from './db/index.js';
 
 dotenv.config();
 
-const apiKey = process.env.TONGYI_API_KEY || process.env.DEEPSEEK_API_KEY;
-const baseURL = process.env.TONGYI_API_KEY 
-  ? 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-  : (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com');
+const apiKey = process.env.DEEPSEEK_API_KEY;
+const baseURL = 'https://api.deepseek.com';
 
 const openai = new OpenAI({ apiKey, baseURL, timeout: 60000 });
-const MODEL_NAME = process.env.TONGYI_API_KEY ? 'qwen-plus' : 'deepseek-chat';
+const MODEL_NAME = 'deepseek-chat';
 
 const SYSTEM_PROMPT = `
 你是一位资深的金融App产品经理和用户体验专家。请分析用户的反馈内容。

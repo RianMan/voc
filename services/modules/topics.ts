@@ -91,10 +91,11 @@ export const scanTopics = async (appId: string, startDate?: string, endDate?: st
   return res.json();
 };
 
-export const analyzeTopic = async (topicId: number) => {
+export const analyzeTopic = async (topicId: number, appId?: string) => { // 👈 增加参数
   const res = await fetch(`${API_BASE}/topics/${topicId}/analyze`, {
     method: 'POST',
-    headers: getAuthHeaders()
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }, // 👈 确保 Content-Type
+    body: JSON.stringify({ appId }) // 👈 发送 appId
   });
   return res.json();
 };

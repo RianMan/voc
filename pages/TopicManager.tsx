@@ -138,7 +138,10 @@ export const TopicManager: React.FC = () => {
   const handleAnalyze = async (topic: TopicConfig) => {
     setAnalyzing(topic.id);
     try {
-      await analyzeTopic(topic.id);
+      // 👈 传入 filterApp (当前选中的 App ID)
+      // 如果 filterApp 为空字符串，传 undefined，让后端去分析全量(如果业务允许)
+      await analyzeTopic(topic.id, filterApp || undefined);
+      
       const historyRes = await fetchTopicHistory(topic.id);
       setShowAnalysis({ topic, history: historyRes.data || [] });
     } catch (e) {

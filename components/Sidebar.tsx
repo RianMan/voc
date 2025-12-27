@@ -21,7 +21,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView })
     // === 高级功能 ===
     { id: 'divider1', label: '高级功能', divider: true },
     { id: 'topics', label: '专题管理', icon: Tag, roles: ['admin', 'operator'] },
-    { id: 'clusters', label: '聚类分析', icon: Layers, roles: ['admin', 'operator', 'viewer'] },
+    // { id: 'clusters', label: '聚类分析', icon: Layers, roles: ['admin', 'operator', 'viewer'] },
     { id: 'verification', label: '闭环验证', icon: Target, roles: ['admin', 'operator'] },
     
     // === 系统管理 ===

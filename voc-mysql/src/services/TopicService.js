@@ -156,8 +156,14 @@ export async function getApplicableTopics(appId, country) {
  * @returns {Array} 匹配结果列表
  */
 export async function scanReviewForTopics(review) {
-  const { id, appId, country, translated_text } = review;
-  if (!translated_text) return [];
+  // 1. 解构出 text (原文)
+  const { id, appId, country, translated_text, text } = review;
+  
+  // 2. [关键修改] 优先用翻译，如果没有翻译（如中文App），则用原文
+  const contentToScan = translated_text || text;
+  
+  // 3. 如果连原文都没有，才跳过
+  if (!contentToScan) return [];
   
   const topics = await getApplicableTopics(appId, country);
   const matches = [];
@@ -173,7 +179,8 @@ export async function scanReviewForTopics(review) {
         appId,
         country,
         matchedKeywords: [aiResult.reason],
-        matchedText: extractMatchContext(translated_text, topic.keywords[0] || '')
+        // 4. [关键修改] 上下文截取也使用 contentToScan
+        matchedText: extractMatchContext(contentToScan, topic.keywords[0] || '')
       });
     }
   }
@@ -235,7 +242,7 @@ export async function batchScanReviews(reviews) {
  * 获取专题匹配的评论详情
  */
 export async function getTopicMatchedReviews(topicId, options = {}) {
-  const { startDate, endDate, limit = 100 } = options;
+  const { startDate, endDate, limit = 100, appId } = options; // 👈 增加 appId 解构
   
   let sql = `
     SELECT tm.*, tm.matched_keywords, tm.matched_text
@@ -243,6 +250,12 @@ export async function getTopicMatchedReviews(topicId, options = {}) {
     WHERE tm.topic_id = ?
   `;
   const params = [topicId];
+  
+  // 👈 新增：如果传入了 appId，则只查询该 App 的匹配记录
+  if (appId) {
+    sql += ' AND tm.app_id = ?';
+    params.push(appId);
+  }
   
   if (startDate) {
     sql += ' AND tm.created_at >= ?';

@@ -115,10 +115,16 @@ router.post('/topics/scan', authMiddleware, requireRole('admin', 'operator'), as
 router.post('/topics/:id/analyze', authMiddleware, async (req, res) => {
   try {
     const topicId = parseInt(req.params.id);
-    const reviews = await TopicService.getTopicMatchedReviews(topicId, req.body);
-    console.log(reviews, typeof reviews);
+    // 👈 提取 body 中的 appId
+    const { appId, startDate, endDate } = req.body; 
+    
+    // 👈 将 appId 传入查询函数
+    const reviews = await TopicService.getTopicMatchedReviews(topicId, { appId, startDate, endDate });
+    
+    // console.log(reviews, typeof reviews); // Debug log
+    
     if (reviews.length === 0) {
-      return res.json({ success: true, message: '无匹配评论' });
+      return res.json({ success: true, message: '无匹配评论 (或该App下无匹配)' });
     }
     
     const result = await TopicService.analyzeTopicWithAI(topicId, reviews);
