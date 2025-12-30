@@ -125,7 +125,14 @@ export const TopicManager: React.FC = () => {
     }
     setScanning(true);
     try {
-      const result = await scanTopics(filterApp);  // 传 appId
+      // ✅ 修复点：传入 scanStartDate 和 scanEndDate
+      // 如果为空字符串，传 undefined，避免后端解析错误
+      const result = await scanTopics(
+        filterApp, 
+        scanStartDate || undefined, 
+        scanEndDate || undefined
+      );
+      
       alert(`扫描完成！扫描 ${result.scanned} 条，匹配 ${result.matched} 条`);
       loadData();
     } catch (e) {
@@ -138,14 +145,32 @@ export const TopicManager: React.FC = () => {
   const handleAnalyze = async (topic: TopicConfig) => {
     setAnalyzing(topic.id);
     try {
-      // 👈 传入 filterApp (当前选中的 App ID)
-      // 如果 filterApp 为空字符串，传 undefined，让后端去分析全量(如果业务允许)
-      await analyzeTopic(topic.id, filterApp || undefined);
+      // ✅ 修复点：传入时间范围，实现“所选即所析”
+      const res = await analyzeTopic(
+        topic.id, 
+        filterApp || undefined,
+        scanStartDate || undefined, // 限制分析开始时间
+        scanEndDate || undefined    // 限制分析结束时间
+      );
       
-      const historyRes = await fetchTopicHistory(topic.id);
-      setShowAnalysis({ topic, history: historyRes.data || [] });
+      if (res.message && res.message.includes('无匹配评论')) {
+        const shouldScan = window.confirm(
+          `⚠️ 无法分析：在当前时间范围内（${scanStartDate || '最早'} ~ ${scanEndDate || '至今'}），未找到与「${topic.name}」匹配的评论。\n\n` +
+          `🚀 是否立即对该时间段执行扫描？`
+        );
+        
+        if (shouldScan) {
+          await handleScan();
+        }
+      } else if (res.success) {
+        const historyRes = await fetchTopicHistory(topic.id);
+        setShowAnalysis({ topic, history: historyRes.data || [] });
+      } else {
+        alert(`分析失败: ${res.error || '未知错误'}`);
+      }
     } catch (e) {
-      alert('分析失败');
+      console.error(e);
+      alert('分析请求发生异常');
     } finally {
       setAnalyzing(null);
     }

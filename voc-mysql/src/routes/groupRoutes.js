@@ -6,6 +6,7 @@ const router = express.Router();
 /**
  * GET /api/groups
  * 获取问题分组列表（按App + 月份聚类）
+ * 优化：增加 source_breakdown 统计
  */
 router.get('/groups', async (req, res) => {
   try {
@@ -25,7 +26,6 @@ router.get('/groups', async (req, res) => {
       params.push(appId);
     }
     
-    // 添加月份筛选
     if (year) {
       sql += ' AND rg.year = ?';
       params.push(parseInt(year));
@@ -39,11 +39,38 @@ router.get('/groups', async (req, res) => {
     
     const [rows] = await pool.execute(sql, params);
     
-    // 解析JSON字段
-    const formattedRows = rows.map(row => ({
-      ...row,
-      review_ids: typeof row.review_ids === 'string' ? JSON.parse(row.review_ids) : row.review_ids,
-      sample_reviews: typeof row.sample_reviews === 'string' ? JSON.parse(row.sample_reviews) : row.sample_reviews
+    // 并行处理每个分组，获取来源统计
+    const formattedRows = await Promise.all(rows.map(async (row) => {
+      const reviewIds = typeof row.review_ids === 'string' ? JSON.parse(row.review_ids) : row.review_ids;
+      const sampleReviews = typeof row.sample_reviews === 'string' ? JSON.parse(row.sample_reviews) : row.sample_reviews;
+      
+      // 统计来源分布
+      let sourceBreakdown = { google_play: 0, udesk: 0 };
+      
+      if (reviewIds && reviewIds.length > 0) {
+        // 注意：如果 ID 很多，这里直接 IN 查询可能有效率问题，但对于单页展示的分组（通常reviewIds不会成千上万）是可以接受的
+        // 使用 external_id 还是 id 取决于聚类逻辑，这里假设是 id
+        const placeholders = reviewIds.map(() => '?').join(',');
+        const [sourceRows] = await pool.execute(
+          `SELECT source, COUNT(*) as count 
+           FROM voc_feedbacks 
+           WHERE id IN (${placeholders}) 
+           GROUP BY source`,
+          reviewIds
+        );
+        
+        sourceRows.forEach(s => {
+          if (s.source === 'google_play') sourceBreakdown.google_play = s.count;
+          else if (s.source.includes('udesk')) sourceBreakdown.udesk += s.count; // 合并所有 udesk 渠道
+        });
+      }
+
+      return {
+        ...row,
+        review_ids: reviewIds,
+        sample_reviews: sampleReviews,
+        source_breakdown: sourceBreakdown // 新增字段
+      };
     }));
     
     res.json({ success: true, data: formattedRows });

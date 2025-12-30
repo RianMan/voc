@@ -272,9 +272,8 @@ export async function getTopicMatchedReviews(topicId, options = {}) {
   return rows;
 }
 
-/**
- * AI 分析专题反馈
- */
+
+
 /**
  * AI 分析专题反馈
  */
@@ -287,49 +286,101 @@ export async function analyzeTopicWithAI(topicId, reviews) {
   const isQwen = !!process.env.TONGYI_API_KEY;
   const model = isQwen ? 'qwen3-max' : 'deepseek-chat';
 
-  const prompt = `你是一位金融科技产品分析专家。请分析以下关于"${topic.name}"专题的用户反馈。
+  // ==================== 1. 初始化聚合器 ====================
+  const BATCH_SIZE = 50;
+  const aggregated = {
+    sentiment: { positive: 0, negative: 0, neutral: 0 },
+    painPoints: new Set(),
+    recommendations: new Set(),
+    summaries: []
+  };
+
+  // ==================== 2. 分批处理循环 ====================
+  for (let i = 0; i < reviews.length; i += BATCH_SIZE) {
+    const batch = reviews.slice(i, i + BATCH_SIZE);
+    console.log(`[TopicAnalysis] Processing batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(reviews.length/BATCH_SIZE)} (${batch.length} reviews)...`);
+
+    const prompt = `你是一位金融科技产品分析专家。请分析以下关于"${topic.name}"专题的用户反馈。
 
 ## 专题信息
 - 名称: ${topic.name}
 - 描述: ${topic.description || '无'}
 - 关键词: ${JSON.stringify(topic.keywords)}
 
-## 匹配到的用户反馈 (共${reviews.length}条)
-${JSON.stringify(reviews.slice(0, 50).map(r => ({
+## 匹配到的用户反馈 (本批次 ${batch.length} 条)
+${JSON.stringify(batch.map(r => ({
   text: r.matched_text,
   keywords: r.matched_keywords
 })), null, 2)}
 
 请返回 JSON 格式的分析结果:
 {
-  "summary": "一句话总结",
+  "summary": "一句话总结本批次的核心问题",
   "sentimentBreakdown": { "positive": 数量, "negative": 数量, "neutral": 数量 },
   "painPoints": ["痛点1", "痛点2", "痛点3"],
   "recommendations": ["建议1", "建议2"]
 }`;
 
-  const completion = await client.chat.completions.create({
-    model,
-    max_tokens: 2000,
-    temperature: 0.3,
-    response_format: { type: 'json_object' },
-    messages: [
-      { role: 'system', content: '你是专业的VOC分析专家，请用中文回复，返回JSON格式。' },
-      { role: 'user', content: prompt }
-    ]
-  });
+    try {
+      const completion = await client.chat.completions.create({
+        model,
+        max_tokens: 2000,
+        temperature: 0.3,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: '你是专业的VOC分析专家，请用中文回复，返回JSON格式。' },
+          { role: 'user', content: prompt }
+        ]
+      });
 
-  if (completion.usage) {
-    await recordAICost(isQwen ? 'qwen' : 'deepseek', model, 'topic_analysis', completion.usage);
+      if (completion.usage) {
+        await recordAICost(isQwen ? 'qwen' : 'deepseek', model, 'topic_analysis', completion.usage);
+      }
+
+      const result = JSON.parse(completion.choices[0].message.content);
+
+      // --- 聚合逻辑 ---
+      // 1. 累加情感数据
+      if (result.sentimentBreakdown) {
+        aggregated.sentiment.positive += (result.sentimentBreakdown.positive || 0);
+        aggregated.sentiment.negative += (result.sentimentBreakdown.negative || 0);
+        aggregated.sentiment.neutral += (result.sentimentBreakdown.neutral || 0);
+      }
+
+      // 2. 收集痛点 (去重)
+      if (Array.isArray(result.painPoints)) {
+        result.painPoints.forEach(p => aggregated.painPoints.add(p));
+      }
+
+      // 3. 收集建议 (去重)
+      if (Array.isArray(result.recommendations)) {
+        result.recommendations.forEach(r => aggregated.recommendations.add(r));
+      }
+
+      // 4. 收集摘要
+      if (result.summary) {
+        aggregated.summaries.push(result.summary);
+      }
+
+    } catch (e) {
+      console.error(`[TopicAnalysis] Batch ${Math.floor(i/BATCH_SIZE) + 1} failed:`, e.message);
+      // 继续处理下一批，不中断整体流程
+    }
   }
 
-  const result = JSON.parse(completion.choices[0].message.content);
+  // ==================== 3. 最终汇总与保存 ====================
   
-  // 保存分析结果
+  // 合并摘要
+  let finalSummary = aggregated.summaries[0] || "无有效分析结果";
+  if (aggregated.summaries.length > 1) {
+    // 简单的拼接策略，以分号分隔
+    finalSummary = aggregated.summaries.join('; '); 
+  }
+
   const today = new Date();
   const periodStart = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
   
-  // 👇 准备样本评论数据
+  // 样本数据只取前 10 条展示
   const sampleReviews = reviews.slice(0, 10).map(r => ({
     id: r.review_id,
     text: r.matched_text,
@@ -344,6 +395,10 @@ ${JSON.stringify(reviews.slice(0, 50).map(r => ({
       ai_summary, pain_points, recommendations, sample_reviews)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
+       total_matches = VALUES(total_matches),
+       sentiment_positive = VALUES(sentiment_positive),
+       sentiment_negative = VALUES(sentiment_negative),
+       sentiment_neutral = VALUES(sentiment_neutral),
        ai_summary = VALUES(ai_summary),
        pain_points = VALUES(pain_points),
        recommendations = VALUES(recommendations),
@@ -353,20 +408,26 @@ ${JSON.stringify(reviews.slice(0, 50).map(r => ({
       today.toISOString().split('T')[0],
       periodStart.toISOString().split('T')[0],
       today.toISOString().split('T')[0],
-      reviews.length,
-      result.sentimentBreakdown?.positive || 0,
-      result.sentimentBreakdown?.negative || 0,
-      result.sentimentBreakdown?.neutral || 0,
-      result.summary,
-      JSON.stringify(result.painPoints),
-      JSON.stringify(result.recommendations),
-      JSON.stringify(sampleReviews)  // 👈 新增
+      reviews.length, // 总匹配数
+      aggregated.sentiment.positive, // 聚合后的正面
+      aggregated.sentiment.negative, // 聚合后的负面
+      aggregated.sentiment.neutral,  // 聚合后的中性
+      finalSummary,
+      JSON.stringify(Array.from(aggregated.painPoints)),      // 转回数组
+      JSON.stringify(Array.from(aggregated.recommendations)), // 转回数组
+      JSON.stringify(sampleReviews)
     ]
   );
   
-  return result;
+  return {
+    success: true,
+    totalAnalyzed: reviews.length,
+    sentimentBreakdown: aggregated.sentiment,
+    summary: finalSummary,
+    painPoints: Array.from(aggregated.painPoints),
+    recommendations: Array.from(aggregated.recommendations)
+  };
 }
-
 /**
  * 获取专题分析历史
  */

@@ -1,15 +1,29 @@
-// pages/IssueHandler.tsx 完整代码实现
 import React, { useState, useEffect } from 'react';
 import { 
-  ChevronRight, ArrowLeft, MessageSquare, AlertCircle, 
-  Loader2, LayoutGrid, FileText, ExternalLink, Search, Filter, Settings2 ,X
+  Loader2, FileText, ArrowLeft, Search, ExternalLink 
 } from 'lucide-react';
+import { 
+  Card, Button, Tag, Space, Select, DatePicker, Drawer, Timeline, 
+  Input, message, Popconfirm, Tooltip, Avatar, Typography, Divider 
+} from 'antd';
+import { 
+  CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, 
+  UserOutlined, GoogleOutlined, CommentOutlined, RobotOutlined,
+  PlayCircleOutlined, SyncOutlined
+} from '@ant-design/icons';
 import { fetchApps, generateWeeklyReport } from '../services/api';
 import { formatDate } from '../tools';
+import { useAuth } from '../contexts/AuthContext';
+
+const { Title, Text, Paragraph } = Typography;
+const { Option } = Select;
+const { TextArea } = Input;
 
 const API_BASE = '/api';
 
+// Markdown 解析器保持不变
 function parseMarkdown(md: string): string {
+  // ... (保留原有的 parseMarkdown 函数逻辑)
   return md
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -28,6 +42,7 @@ function parseMarkdown(md: string): string {
 }
 
 export const IssueHandler: React.FC = () => {
+  const { user } = useAuth();
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [apps, setApps] = useState<any[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
@@ -35,17 +50,21 @@ export const IssueHandler: React.FC = () => {
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // 报告相关
   const [generatingReport, setGeneratingReport] = useState(false);
   const [reportContent, setReportContent] = useState<string | null>(null);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportMeta, setReportMeta] = useState<any>(null);
   
-  // 筛选与搜索状态
-  const [filters, setFilters] = useState({ appId: '', year: 2025, month: 12 });
-  const [detailFilters, setDetailFilters] = useState({ keyword: '', source: 'google_play' });
+  // 筛选
+  const [filters, setFilters] = useState({ appId: '', year: new Date().getFullYear(), month: new Date().getMonth() + 1 });
+  const [detailFilters, setDetailFilters] = useState({ keyword: '', source: '' });
   
-  // 状态流转弹窗状态
-  const [showStatusModal, setShowStatusModal] = useState<any>(null);
+  // 操作日志抽屉
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activeLogGroup, setActiveLogGroup] = useState<any>(null);
+  const [remarkInput, setRemarkInput] = useState('');
+  const [updatingGroup, setUpdatingGroup] = useState(false);
 
   useEffect(() => {
     const initApps = async () => {
@@ -62,17 +81,19 @@ export const IssueHandler: React.FC = () => {
     if (filters.appId && view === 'list') loadGroups();
   }, [filters, view]);
 
-  // 详情页筛选监听
   useEffect(() => {
     if (view === 'detail' && selectedGroup) loadReviews();
   }, [detailFilters]);
 
   const loadGroups = async () => {
     setLoading(true);
-    const params = new URLSearchParams({ ...filters } as any);
-    const res = await fetch(`${API_BASE}/groups?${params}`).then(r => r.json());
-    setGroups(res.data || []);
-    setLoading(false);
+    try {
+        const params = new URLSearchParams({ ...filters } as any);
+        const res = await fetch(`${API_BASE}/groups?${params}`).then(r => r.json());
+        setGroups(res.data || []);
+    } finally {
+        setLoading(false);
+    }
   };
 
   const loadReviews = async () => {
@@ -84,153 +105,316 @@ export const IssueHandler: React.FC = () => {
     setReviews(res.data || []);
   };
 
-  const handleUpdateProcessing = async (id: number, status: string, remark: string) => {
-    await fetch(`${API_BASE}/groups/${id}/processing`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, remark, operator: 'Admin' })
-    });
-    setShowStatusModal(null);
-    loadGroups();
+  // 更新状态 (快速操作)
+  const handleUpdateStatus = async (group: any, newStatus: string) => {
+    try {
+        await fetch(`${API_BASE}/groups/${group.id}/processing`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                status: newStatus, 
+                remark: group.remark, // 保持原有备注
+                operator: user?.displayName || user?.username || 'Operator' 
+            })
+        });
+        message.success(`状态已更新为 ${newStatus}`);
+        loadGroups();
+    } catch (e) {
+        message.error('更新失败');
+    }
+  };
+
+  // 在抽屉中保存备注
+  const handleSaveRemark = async () => {
+    if (!activeLogGroup) return;
+    setUpdatingGroup(true);
+    try {
+        await fetch(`${API_BASE}/groups/${activeLogGroup.id}/processing`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                status: activeLogGroup.processing_status, // 保持原有状态
+                remark: remarkInput, 
+                operator: user?.displayName || user?.username || 'Operator' 
+            })
+        });
+        message.success('备注/日志已保存');
+        setDrawerOpen(false);
+        loadGroups();
+    } catch (e) {
+        message.error('保存失败');
+    } finally {
+        setUpdatingGroup(false);
+    }
   };
 
   const handleGenerateWeeklyReport = async () => {
-      if (!filters.appId) {
-        alert('请先选择一个App');
-        return;
-      }
+      if (!filters.appId) return message.warning('请先选择一个App');
       
       setGeneratingReport(true);
       try {
         const data = await generateWeeklyReport(filters.appId, 0);
-        
         if (data.success) {
           setReportContent(data.report);
           setReportMeta(data.meta);
           setShowReportModal(true);
+          message.success('周报生成成功');
         } else {
-          alert('生成失败');
+          message.error('生成失败');
         }
       } catch (e) {
-        alert('生成失败，请重试');
+        message.error('生成失败，请重试');
       } finally {
         setGeneratingReport(false);
       }
-    };
-
-  const handleEnterDetail = async (group: any) => {
-    setLoading(true);
-    setSelectedGroup(group);
-    
-    // 立即执行第一次加载，不完全依赖 useEffect
-    const initialParams = new URLSearchParams({ 
-      keyword: '', 
-      source: detailFilters.source // 使用当前定义的默认来源
-    });
-    
-    try {
-      const res = await fetch(`${API_BASE}/groups/${group.id}/reviews?${initialParams}`).then(r => r.json());
-      setReviews(res.data || []);
-      setView('detail');
-    } catch (e) {
-      console.error("加载详情失败", e);
-    } finally {
-      setLoading(false);
-    }
   };
 
-  // 列表视图：增加状态展示和操作入口
+  const handleEnterDetail = (group: any) => {
+    setSelectedGroup(group);
+    setReviews([]); // 先清空，等待加载
+    
+    // 初始化详情页筛选器
+    setDetailFilters({ keyword: '', source: '' });
+    
+    setView('detail');
+    
+    // 立即加载 (useEffect 会处理 filter 变化，这里手动触发第一次)
+    const initialParams = new URLSearchParams({ keyword: '', source: '' });
+    fetch(`${API_BASE}/groups/${group.id}/reviews?${initialParams}`)
+        .then(r => r.json())
+        .then(res => setReviews(res.data || []));
+  };
+
+  const openLogDrawer = (group: any, e: React.MouseEvent) => {
+      e.stopPropagation();
+      setActiveLogGroup(group);
+      setRemarkInput(group.remark || '');
+      setDrawerOpen(true);
+  };
+
+  // 状态颜色映射
+  const getStatusTag = (status: string) => {
+      switch (status) {
+          case 'resolved': return <Tag icon={<CheckCircleOutlined />} color="success">已解决</Tag>;
+          case 'processing': return <Tag icon={<SyncOutlined spin />} color="processing">处理中</Tag>;
+          case 'ignored': return <Tag icon={<CloseCircleOutlined />} color="default">已忽略</Tag>;
+          default: return <Tag icon={<ClockCircleOutlined />} color="warning">待处理</Tag>;
+      }
+  };
+
+  // 列表视图
   const renderListView = () => (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-slate-800">问题治理中心</h2>
-        <button 
-          onClick={handleGenerateWeeklyReport}
-          disabled={generatingReport || !filters.appId}  // ✅ 使用 filters.appId
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
+    <div className="space-y-6 max-w-7xl mx-auto">
+      <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+        <div className="flex items-center gap-4">
+            <h2 className="text-2xl font-bold text-slate-800 m-0">问题治理中心</h2>
+            <Select 
+                value={filters.appId} 
+                onChange={v => setFilters({...filters, appId: v})}
+                style={{ width: 200 }}
+                size="large"
+            >
+                {apps.map(app => <Option key={app.appId} value={app.appId}>{app.appName}</Option>)}
+            </Select>
+            <div className="flex items-center bg-slate-50 rounded-lg p-1">
+                <Input 
+                    type="number" 
+                    value={filters.year} 
+                    onChange={e => setFilters({...filters, year: parseInt(e.target.value)})} 
+                    style={{ width: 80 }} 
+                    variant="borderless"
+                />
+                <span className="text-slate-400">年</span>
+                <Select 
+                    value={filters.month} 
+                    onChange={v => setFilters({...filters, month: v})}
+                    variant="borderless"
+                    style={{ width: 80 }}
+                >
+                    {[...Array(12)].map((_, i) => <Option key={i+1} value={i+1}>{i+1}月</Option>)}
+                </Select>
+            </div>
+        </div>
+        <Button 
+            type="primary" 
+            icon={generatingReport ? <Loader2 className="animate-spin" /> : <FileText size={16} />}
+            onClick={handleGenerateWeeklyReport}
+            loading={generatingReport}
+            disabled={!filters.appId}
         >
-          {generatingReport ? (
-            <Loader2 size={18} className="animate-spin" />
-          ) : (
-            <FileText size={18} />
-          )}
-          {generatingReport ? '生成中...' : '生成本周周报'}
-        </button>
-        {/* <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm"><FileText size={18} /> 生成治理周报</button> */}
+            生成本周周报
+        </Button>
       </div>
 
-      <div className="bg-white p-4 rounded-xl border flex gap-4 shadow-sm items-center">
-        <select className="bg-slate-50 border rounded-lg px-3 py-2 text-sm font-bold" value={filters.appId} onChange={e => setFilters({...filters, appId: e.target.value})}>
-          {apps.map(app => <option key={app.appId} value={app.appId}>{app.appName}</option>)}
-        </select>
-        <div className="flex gap-2 text-sm">
-          <input type="number" className="w-20 border rounded px-2" value={filters.year} onChange={e => setFilters({...filters, year: parseInt(e.target.value)})} />
-          <span>年</span>
-          <select className="border rounded px-2" value={filters.month} onChange={e => setFilters({...filters, month: parseInt(e.target.value)})}>
-            {[...Array(12)].map((_, i) => <option key={i+1} value={i+1}>{i+1}月</option>)}
-          </select>
-        </div>
-      </div>
+      {loading ? (
+          <div className="flex justify-center py-20"><Loader2 className="animate-spin text-blue-600" size={40} /></div>
+      ) : (
+          <div className="grid gap-4">
+            {groups.map(group => {
+                // 计算来源总数 (为了展示 "总计 77")
+                const gpCount = group.source_breakdown?.google_play || 0;
+                const udeskCount = group.source_breakdown?.udesk || 0;
+                const totalCount = group.review_count;
 
-      <div className="grid gap-4">
-        {groups.map(group => (
-          <div key={group.id} className="bg-white border p-5 rounded-xl hover:shadow-lg transition-all flex items-center justify-between group">
-            <div className="flex items-center gap-5 flex-1 cursor-pointer" onClick={() => handleEnterDetail(group)}>
-              <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center font-bold">{group.group_rank}</div>
-              <div>
-                <h3 className="font-bold text-slate-800 text-lg group-hover:text-blue-600">{group.group_title}</h3>
-                <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                    group.processing_status === 'resolved' ? 'bg-green-100 text-green-700' : 
-                    group.processing_status === 'processing' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'
-                  }`}>
-                    {group.processing_status === 'resolved' ? '已解决' : group.processing_status === 'processing' ? '处理中' : '待处理'}
-                  </span>
-                  <span>{group.review_count} 条评论</span>
-                  {group.remark && <span className="text-amber-600 truncate max-w-[200px]">注: {group.remark}</span>}
-                </div>
-              </div>
-            </div>
-            <button onClick={() => setShowStatusModal(group)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600"><Settings2 size={20} /></button>
+                return (
+                  <Card key={group.id} hoverable bodyStyle={{ padding: '20px' }} className="border-slate-200">
+                    <div className="flex items-start gap-6">
+                        {/* 排名 */}
+                        <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center font-bold text-xl text-slate-500 flex-shrink-0">
+                            {group.group_rank}
+                        </div>
+
+                        {/* 主体内容 */}
+                        <div className="flex-1 cursor-pointer" onClick={() => handleEnterDetail(group)}>
+                            <div className="flex items-center gap-3 mb-2">
+                                <h3 className="text-lg font-bold text-slate-800 m-0 hover:text-blue-600 transition-colors">
+                                    {group.group_title}
+                                </h3>
+                                {getStatusTag(group.processing_status)}
+                            </div>
+                            
+                            {/* 来源分布展示 (优化点 2) */}
+                            <Space size="large" className="text-slate-500 text-sm">
+                                <span className="font-medium text-slate-800">总计 {totalCount} 条</span>
+                                <Divider type="vertical" />
+                                <Space>
+                                    <Tooltip title="Google Play 评论数">
+                                        <Tag icon={<GoogleOutlined />} color={gpCount > 0 ? "success" : "default"}>
+                                            GP: {gpCount}
+                                        </Tag>
+                                    </Tooltip>
+                                    <Tooltip title="Udesk 工单数">
+                                        <Tag icon={<RobotOutlined />} color={udeskCount > 0 ? "geekblue" : "default"}>
+                                            Udesk: {udeskCount}
+                                        </Tag>
+                                    </Tooltip>
+                                </Space>
+                            </Space>
+
+                            {group.remark && (
+                                <div className="mt-3 bg-amber-50 text-amber-700 px-3 py-1.5 rounded text-sm inline-block">
+                                    <CommentOutlined className="mr-2" />
+                                    {group.remark}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* 操作区 (优化点 1: 平铺操作) */}
+                        <div className="flex flex-col gap-2 items-end min-w-[140px]">
+                            {/* 状态操作按钮 */}
+                            <Space.Compact>
+                                {group.processing_status !== 'resolved' && (
+                                    <Popconfirm title="确定标记为已解决？" onConfirm={() => handleUpdateStatus(group, 'resolved')}>
+                                        <Button size="small" type="text" className="text-green-600 hover:bg-green-50">
+                                            解决
+                                        </Button>
+                                    </Popconfirm>
+                                )}
+                                {group.processing_status === 'pending' && (
+                                    <Popconfirm title="确定标记为处理中？" onConfirm={() => handleUpdateStatus(group, 'processing')}>
+                                        <Button size="small" type="text" className="text-blue-600 hover:bg-blue-50">
+                                            跟进
+                                        </Button>
+                                    </Popconfirm>
+                                )}
+                                {group.processing_status !== 'ignored' && (
+                                    <Popconfirm title="确定忽略此问题？" onConfirm={() => handleUpdateStatus(group, 'ignored')}>
+                                        <Button size="small" type="text" className="text-slate-400 hover:bg-slate-100">
+                                            忽略
+                                        </Button>
+                                    </Popconfirm>
+                                )}
+                            </Space.Compact>
+
+                            {/* 日志/详情按钮 */}
+                            <Button 
+                                size="small" 
+                                icon={<ClockCircleOutlined />} 
+                                onClick={(e) => openLogDrawer(group, e)}
+                            >
+                                操作日志
+                            </Button>
+                            
+                            {group.operator && (
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                    <UserOutlined /> {group.operator}
+                                </Text>
+                            )}
+                        </div>
+                    </div>
+                  </Card>
+                );
+            })}
           </div>
-        ))}
-      </div>
-
-      {/* 状态流转 Modal */}
-      {showStatusModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-xl w-[400px]">
-            <h3 className="font-bold mb-4 text-lg">处理状态流转</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm mb-1 text-slate-600">处理进度</label>
-                <select id="statusSelect" className="w-full border rounded-lg p-2" defaultValue={showStatusModal.processing_status}>
-                  <option value="pending">待处理</option>
-                  <option value="processing">处理中</option>
-                  <option value="resolved">已解决</option>
-                  <option value="ignored">忽略</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm mb-1 text-slate-600">备注说明</label>
-                <textarea id="remarkInput" className="w-full border rounded-lg p-2 h-24" defaultValue={showStatusModal.remark} placeholder="填写处理进度或结论..."></textarea>
-              </div>
-              <div className="flex gap-2 justify-end">
-                <button onClick={() => setShowStatusModal(null)} className="px-4 py-2 text-slate-500">取消</button>
-                <button 
-                  onClick={() => handleUpdateProcessing(
-                    showStatusModal.id, 
-                    (document.getElementById('statusSelect') as HTMLSelectElement).value,
-                    (document.getElementById('remarkInput') as HTMLTextAreaElement).value
-                  )}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg"
-                >保存</button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
 
+      {/* 状态流转/日志抽屉 */}
+      <Drawer
+        title={
+            <div className="flex items-center gap-2">
+                <span>操作日志</span>
+                <Tag>{activeLogGroup?.group_title}</Tag>
+            </div>
+        }
+        width={500}
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        footer={
+            <div className="flex justify-end gap-2">
+                <Button onClick={() => setDrawerOpen(false)}>取消</Button>
+                <Button type="primary" onClick={handleSaveRemark} loading={updatingGroup}>保存备注</Button>
+            </div>
+        }
+      >
+        <div className="space-y-6">
+            <div>
+                <h4 className="mb-2 font-bold text-slate-700">处理进度流转</h4>
+                <Timeline
+                    items={[
+                        {
+                            color: 'green',
+                            children: (
+                                <>
+                                    <Text strong>创建时间</Text>
+                                    <br/>
+                                    <Text type="secondary" className="text-xs">{formatDate(activeLogGroup?.created_at)}</Text>
+                                </>
+                            ),
+                        },
+                        // 这里如果后端有完整 logs 表支持，可以 map 出来。目前展示最后一次更新。
+                        activeLogGroup?.updated_at !== activeLogGroup?.created_at && {
+                            color: 'blue',
+                            children: (
+                                <>
+                                    <Text strong>最后更新</Text> 
+                                    <Tag className="ml-2">{getStatusTag(activeLogGroup?.processing_status)}</Tag>
+                                    <br/>
+                                    <Space size="small" className="text-xs text-slate-500 mt-1">
+                                        <UserOutlined /> {activeLogGroup?.operator || 'System'}
+                                        <ClockCircleOutlined /> {formatDate(activeLogGroup?.updated_at)}
+                                    </Space>
+                                </>
+                            )
+                        }
+                    ].filter(Boolean) as any}
+                />
+            </div>
+
+            <Divider />
+
+            <div>
+                <h4 className="mb-2 font-bold text-slate-700">添加备注/进度说明</h4>
+                <TextArea 
+                    rows={4} 
+                    value={remarkInput} 
+                    onChange={e => setRemarkInput(e.target.value)}
+                    placeholder="在此记录处理进度、原因分析或解决方案..."
+                />
+            </div>
+        </div>
+      </Drawer>
+
+      {/* 周报预览 Modal */}
       {showReportModal && reportContent && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
@@ -238,12 +422,10 @@ export const IssueHandler: React.FC = () => {
               <div>
                 <h3 className="text-lg font-bold">{reportMeta?.appName} 周报</h3>
                 <p className="text-sm text-slate-500">
-                  {reportMeta?.year}年第{reportMeta?.weekNumber}周 · {reportMeta?.dateRange}
+                  {reportMeta?.year}年第{reportMeta?.weekNumber}周
                 </p>
               </div>
-              <button onClick={() => setShowReportModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
-                <X size={20} />
-              </button>
+              <Button type="text" icon={<div className="i-lucide-x" />} onClick={() => setShowReportModal(false)}>X</Button>
             </div>
             
             <div className="flex-1 overflow-y-auto p-6">
@@ -254,18 +436,13 @@ export const IssueHandler: React.FC = () => {
             </div>
             
             <div className="p-4 border-t flex justify-end gap-3">
-              <button
-                onClick={() => {
+              <Button onClick={() => {
                   navigator.clipboard.writeText(reportContent);
-                  alert('已复制到剪贴板');
-                }}
-                className="px-4 py-2 text-sm bg-slate-100 hover:bg-slate-200 rounded-lg"
-              >
-                复制
-              </button>
-              <button onClick={() => setShowReportModal(false)} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg">
-                关闭
-              </button>
+                  message.success('已复制到剪贴板');
+              }}>
+                复制内容
+              </Button>
+              <Button type="primary" onClick={() => setShowReportModal(false)}>关闭</Button>
             </div>
           </div>
         </div>
@@ -273,88 +450,67 @@ export const IssueHandler: React.FC = () => {
     </div>
   );
 
-  // 详情视图：增加关键字筛选和来源跳转
+  // 详情视图 (保持大部分原有逻辑，稍微美化)
   const renderDetailView = () => (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <button onClick={() => setView('list')} className="text-slate-500 hover:text-blue-600"><ArrowLeft size={20} /></button>
-        <h2 className="text-xl font-bold">{selectedGroup.group_title}</h2>
+    <div className="space-y-6 max-w-7xl mx-auto">
+      <div className="flex items-center gap-4 mb-4">
+        <Button icon={<ArrowLeft size={16} />} onClick={() => setView('list')}>返回列表</Button>
+        <h2 className="text-xl font-bold m-0">{selectedGroup?.group_title}</h2>
       </div>
 
-      {/* 筛选工具栏 */}
-      <div className="bg-white p-4 rounded-xl border flex gap-4 shadow-sm items-center">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
-          <input 
-            type="text" placeholder="搜索关键字..." 
-            className="w-full pl-10 pr-4 py-2 border rounded-lg text-sm"
-            value={detailFilters.keyword}
-            onChange={e => setDetailFilters({...detailFilters, keyword: e.target.value})}
-          />
+      <Card>
+        <div className="flex gap-4 items-center">
+            <Input 
+                prefix={<Search size={16} className="text-slate-400" />} 
+                placeholder="搜索评论内容..." 
+                value={detailFilters.keyword}
+                onChange={e => setDetailFilters({...detailFilters, keyword: e.target.value})}
+                style={{ width: 300 }}
+            />
+            <Select 
+                value={detailFilters.source} 
+                onChange={v => setDetailFilters({...detailFilters, source: v})}
+                style={{ width: 150 }}
+            >
+                <Option value="">所有来源</Option>
+                <Option value="google_play">Google Play</Option>
+                <Option value="udesk">Udesk 客服</Option>
+            </Select>
         </div>
-        <select 
-          className="border rounded-lg px-3 py-2 text-sm"
-          value={detailFilters.source}
-          onChange={e => setDetailFilters({...detailFilters, source: e.target.value})}
-        >
-          <option value="">所有来源</option>
-          <option value="google_play">Google Play</option>
-          <option value="udesk">Udesk 客服</option>
-        </select>
-      </div>
+      </Card>
 
-      <div className="bg-white rounded-xl border overflow-hidden">
-        <div className="divide-y">
-            {reviews.map((rev) => (
-            <div key={rev.id} className="p-6 hover:bg-slate-50/50 transition-colors">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        {reviews.map((rev, index) => (
+            <div key={rev.id || index} className="p-6 border-b border-slate-100 hover:bg-slate-50 transition-colors last:border-0">
                 <div className="flex justify-between items-start mb-3">
-                <div className="flex items-center gap-3">
-                    {/* 来源标签 */}
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                    rev.source === 'google_play' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
-                    }`}>
-                    {rev.source === 'google_play' ? 'Google Play' : 'Udesk'}
-                    </span>
-                    <span className="text-xs text-slate-500">{rev.country} · {formatDate(rev.date)}</span>
-                    
-                    {/* 如果是 Udesk，展示原始 ID */}
-                    {rev.source !== 'google_play' && rev.id && (
-                    <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-mono">
-                        ID: {rev.id}
-                    </span>
+                    <div className="flex items-center gap-3">
+                        <Tag color={rev.source === 'google_play' ? 'green' : 'geekblue'}>
+                            {rev.source === 'google_play' ? 'Google Play' : 'Udesk'}
+                        </Tag>
+                        <span className="text-xs text-slate-500">{rev.country} · {formatDate(rev.date)}</span>
+                        {rev.source !== 'google_play' && (
+                            <Tag bordered={false}>{rev.id}</Tag>
+                        )}
+                    </div>
+                    {rev.source === 'google_play' && rev.sourceUrl && (
+                        <a href={rev.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 flex items-center gap-1 text-xs hover:underline">
+                            查看详情 <ExternalLink size={12} />
+                        </a>
                     )}
                 </div>
+                
+                <Paragraph className="text-sm font-medium mb-2">
+                    {rev.translated_text || rev.text}
+                </Paragraph>
 
-                {/* GP 原文跳转 */}
-                {rev.source === 'google_play' && rev.sourceUrl && (
-                    <a 
-                    href={rev.sourceUrl} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-blue-500 flex items-center gap-1 text-xs hover:underline"
-                    >
-                    查看 GP 详情 <ExternalLink size={12} />
-                    </a>
-                )}
-                </div>
-
-                {/* 翻译内容（主要展示） */}
-                <p className="text-slate-800 text-sm leading-relaxed font-medium">
-                {rev.translated_text || rev.text}
-                </p>
-
-                {/* 原文内容（折叠展示或小字展示） */}
                 {(rev.translated_text && rev.text) && (
-                <div className="mt-3 p-3 bg-slate-50 rounded border-l-2 border-slate-200">
-                    <p className="text-xs text-slate-500 italic">
-                    <span className="font-bold mr-1 text-slate-400">原文:</span>
-                    {rev.text}
-                    </p>
-                </div>
+                    <div className="bg-slate-50 p-3 rounded text-xs text-slate-500 italic">
+                        原文: {rev.text}
+                    </div>
                 )}
             </div>
-            ))}
-        </div>
+        ))}
+        {reviews.length === 0 && <div className="p-10 text-center text-slate-400">暂无符合条件的评论</div>}
       </div>
     </div>
   );
