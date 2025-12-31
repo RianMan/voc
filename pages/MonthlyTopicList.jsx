@@ -1,3 +1,4 @@
+// 文件：pages/MonthlyTopicList.jsx
 import React, { useState, useEffect } from 'react';
 import { Table, Tag, Button, Modal, Form, Input, DatePicker, message, Select, Drawer, List } from 'antd';
 import { Sparkles, Settings, Plus, Trash2 } from 'lucide-react';
@@ -15,15 +16,13 @@ export const MonthlyTopicList = () => {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [generating, setGenerating] = useState(false);
   
-  // 筛选状态
-  const [selectedTopic, setSelectedTopic] = useState('All');
+  // ✅ 修改1：selectedTopic 存储的是 topic_config_id (数字)，初始化为 null
+  const [selectedTopicId, setSelectedTopicId] = useState(null);
   
-  // 事项转化弹窗
+  // ... (保留 taskModal 和 configDrawer 状态)
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [currentItem, setCurrentItem] = useState(null);
   const [taskForm] = Form.useForm();
-
-  // 专题配置管理
   const [isConfigDrawerOpen, setIsConfigDrawerOpen] = useState(false);
   const [configs, setConfigs] = useState([]);
   const [configForm] = Form.useForm();
@@ -37,28 +36,40 @@ export const MonthlyTopicList = () => {
 
   const loadConfigs = async () => {
     const res = await fetchTopicConfigs();
-    if (res.success) setConfigs(res.data);
+    if (res.success) {
+      setConfigs(res.data);
+      // ✅ 修改2：加载配置后，如果没有选中项，默认选中第一个专题
+      if (res.data.length > 0 && !selectedTopicId) {
+        setSelectedTopicId(res.data[0].id);
+      }
+    }
   };
 
-  useEffect(() => { loadData(); loadConfigs(); }, [month]);
+  // 初始化加载
+  useEffect(() => { 
+    loadConfigs(); 
+    loadData(); 
+  }, [month]);
 
+  // ... (保留 handleGenerate, handleCreateTask, handleAddConfig 等函数，逻辑不变)
   const handleGenerate = async () => {
     setGenerating(true);
-    message.loading({ content: 'AI 正在扫描专题并分析...', key: 'gen' });
+    message.loading({ content: 'AI 正在扫描并拆分具体问题...', key: 'gen' });
     const res = await generateTopicTrends('com.mexicash.app', month);
     if (res.success) {
-      message.success({ content: `分析完成，更新 ${res.count} 个专题`, key: 'gen' });
+      message.success({ content: `分析完成，提取了 ${res.count} 个具体问题`, key: 'gen' });
       loadData();
     } else {
       message.error({ content: res.error || '生成失败', key: 'gen' });
     }
     setGenerating(false);
   };
-
+  
+  // ... (openTaskModal, handleCreateTask, handleAddConfig, handleDeleteConfig 保持不变)
   const openTaskModal = (item) => {
     setCurrentItem(item);
     taskForm.setFieldsValue({
-      title: `${month} ${item.topic_name} 专项优化`,
+      title: `${month} ${item.topic_name} 优化`,
       description: item.ai_suggestion,
       owner: item.owners?.[0] || '',
     });
@@ -66,47 +77,49 @@ export const MonthlyTopicList = () => {
   };
 
   const handleCreateTask = async (values) => {
-    const res = await createTask({
-      sourceType: 'topic',
-      sourceId: currentItem.id,
-      originalProblem: currentItem.topic_name,
-      title: values.title,
-      description: values.description,
-      businessValue: values.businessValue,
-      startDate: values.dateRange?.[0]?.format('YYYY-MM-DD'),
-      endDate: values.dateRange?.[1]?.format('YYYY-MM-DD'),
-      ownerName: values.owner
-    });
-
-    if (res.success) {
-      message.success('事项转化成功');
-      setIsTaskModalOpen(false);
-      loadData();
-    }
+      // 保持之前的逻辑
+      const res = await createTask({
+        sourceType: 'topic',
+        sourceId: currentItem.id,
+        originalProblem: currentItem.topic_name,
+        title: values.title,
+        description: values.description,
+        businessValue: values.businessValue,
+        startDate: values.dateRange?.[0]?.format('YYYY-MM-DD'),
+        endDate: values.dateRange?.[1]?.format('YYYY-MM-DD'),
+        ownerName: values.owner
+      });
+      if (res.success) {
+        message.success('事项转化成功');
+        setIsTaskModalOpen(false);
+        loadData();
+      }
   };
 
   const handleAddConfig = async (values) => {
-    const keywords = values.keywords.split(/[,，]/).map(k => k.trim()).filter(Boolean);
-    const res = await createTopicConfig({ name: values.name, keywords });
-    if (res.success) {
-      message.success('专题添加成功');
-      configForm.resetFields();
-      loadConfigs();
-    }
+      const keywords = values.keywords.split(/[,，]/).map(k => k.trim()).filter(Boolean);
+      const res = await createTopicConfig({ name: values.name, keywords });
+      if (res.success) {
+        message.success('专题添加成功');
+        configForm.resetFields();
+        loadConfigs(); // 重新加载配置会触发 useEffect 更新 select
+      }
   };
-
+    
   const handleDeleteConfig = async (id) => {
-    await deleteTopicConfig(id);
-    loadConfigs();
+      await deleteTopicConfig(id);
+      loadConfigs();
   };
 
-  // 前端过滤数据
-  const filteredData = selectedTopic === 'All' 
-    ? data 
-    : data.filter(d => d.topic_name === selectedTopic);
+  // ✅ 修改3：前端过滤数据
+  // 根据 topic_config_id 过滤，只显示当前选中专题下的子问题
+  const filteredData = selectedTopicId 
+    ? data.filter(d => d.topic_config_id === selectedTopicId)
+    : [];
 
   const columns = [
-    { title: '问题', dataIndex: 'topic_name', width: 150, render: t => <span className="font-bold text-blue-700">{t}</span> },
+    // ✅ 修改4：列名改为 "具体问题"
+    { title: '具体细分问题', dataIndex: 'topic_name', width: 180, render: t => <span className="font-bold text-blue-700">{t}</span> },
     { title: '数量', dataIndex: 'issue_count', width: 80, align: 'center', sorter: (a,b) => a.issue_count - b.issue_count },
     { 
       title: '代表性原声', 
@@ -114,9 +127,6 @@ export const MonthlyTopicList = () => {
       render: (_, r) => (
         <div className="text-xs text-slate-600 bg-slate-50 p-2 rounded border border-slate-200">
           <p className="mb-1">{r.sample_translated}</p>
-          <div className="text-slate-400 mt-1">
-            {/* 来源: {r.sample_source === 'google_play' ? 'Google Play' : 'Udesk'} */}
-          </div>
         </div>
       )
     },
@@ -155,17 +165,18 @@ export const MonthlyTopicList = () => {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">专题关注</h2>
-          <p className="text-slate-500">基于自定义关键词的定向监控</p>
+          <p className="text-slate-500">定向监控特定业务域下的具体痛点</p>
         </div>
         <div className="flex gap-4 items-center">
+          {/* ✅ 修改5：移除 "所有问题"，强制单选 */}
           <Select 
-            value={selectedTopic} 
-            onChange={setSelectedTopic} 
+            value={selectedTopicId} 
+            onChange={setSelectedTopicId} 
             style={{ width: 160 }}
-            placeholder="筛选专题"
+            placeholder="请选择监控专题"
+            loading={configs.length === 0}
           >
-            <Option value="All">所有问题</Option>
-            {configs.map(c => <Option key={c.id} value={c.name}>{c.name}</Option>)}
+            {configs.map(c => <Option key={c.id} value={c.id}>{c.name}</Option>)}
           </Select>
 
           <Button icon={<Settings size={16} />} onClick={() => setIsConfigDrawerOpen(true)}>管理专题</Button>
@@ -194,9 +205,10 @@ export const MonthlyTopicList = () => {
         rowKey="id" 
         loading={loading} 
         pagination={{ pageSize: 10 }}
-        locale={{ emptyText: '暂无分析数据，请先配置专题并点击"AI 扫描分析"' }}
+        locale={{ emptyText: selectedTopicId ? '该专题下暂无发现问题' : '请先选择一个专题' }}
       />
-
+      
+      {/* ... Task Modal 和 Config Drawer 保持不变 ... */}
       <Modal 
         title="转化专题为事项" 
         open={isTaskModalOpen} 
@@ -231,9 +243,9 @@ export const MonthlyTopicList = () => {
         <Form form={configForm} layout="vertical" onFinish={handleAddConfig} className="mb-8 p-4 bg-slate-50 rounded-lg border">
           <h3 className="font-bold mb-4 text-slate-700">添加新专题</h3>
           <Form.Item name="name" label="专题名称" rules={[{ required: true }]}>
-            <Input placeholder="输入专题名称" />
+            <Input placeholder="例如：催收服务" />
           </Form.Item>
-          <Form.Item name="keywords" label="关键词 (逗号分隔)" rules={[{ required: true }]}>
+          <Form.Item name="keywords" label="关键词范围 (逗号分隔)" rules={[{ required: true }]}>
             <Input placeholder="例如：杀全家, 威胁, 恐吓" />
           </Form.Item>
           <Button type="primary" htmlType="submit" icon={<Plus size={16} />} block>添加</Button>

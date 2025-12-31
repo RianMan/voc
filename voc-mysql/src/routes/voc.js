@@ -1,33 +1,17 @@
 import { Router } from 'express';
-import { getVocStats, getTrendAnalysis, getSentimentDistribution } from '../db/index.js';
+import { getVocStats, getTrendAnalysis } from '../db/index.js';
 
 const router = Router();
 
 // 1. 趋势折线图
 router.get('/trend-analysis', async (req, res) => {
   try {
-    const { appId, period, sentiment, limit } = req.query;
+    const { appId, period, limit } = req.query;
+    // ✅ 不再传递 sentiment，直接获取全量聚合数据
     const data = await getTrendAnalysis({
       appId,
       period,
-      sentiment,
       limit: limit || 8
-    });
-    res.json({ success: true, data });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Failed' });
-  }
-});
-
-// 2. 情感分布柱状图 (✅ 修改：接收 limit 参数)
-router.get('/sentiment-stats', async (req, res) => {
-  try {
-    const { appId, period, limit } = req.query; // 接收 limit
-    const data = await getSentimentDistribution({ 
-      appId, 
-      period, 
-      limit: limit || 8 
     });
     res.json({ success: true, data });
   } catch (e) {

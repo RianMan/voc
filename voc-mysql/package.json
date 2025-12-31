@@ -13,6 +13,7 @@
     "migrate": "node scripts/migrate-sqlite-to-mysql.js"
   },
   "dependencies": {
+    "axios": "^1.13.2",
     "cors": "^2.8.5",
     "date-fns": "^4.1.0",
     "dotenv": "^16.3.1",

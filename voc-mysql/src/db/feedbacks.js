@@ -3,9 +3,10 @@ import pool from './connection.js';
 // ==================== VOC 统计与趋势查询 ====================
 
 /**
- * 获取趋势分析数据 (核心图表接口)
+ * 获取趋势分析数据 (修改版：聚合所有情感数据)
+ * 返回：date_key, total_count, positive_count, neutral_count, negative_count
  */
-export async function getTrendAnalysis({ appId, period = 'week', sentiment = 'Positive', limit = 8 }) {
+export async function getTrendAnalysis({ appId, period = 'week', limit = 8 }) {
   let dateFormat;
   let interval;
 
@@ -25,37 +26,31 @@ export async function getTrendAnalysis({ appId, period = 'week', sentiment = 'Po
       break;
   }
 
+  // ✅ 修改 SQL：移除 sentiment 筛选，改为 SUM CASE 统计各情感数量
   let sql = `
     SELECT 
       DATE_FORMAT(feedback_time, ?) as date_key,
       COUNT(*) as total_count,
-      SUM(CASE WHEN source = 'google_play' THEN 1 ELSE 0 END) as google_count,
-      SUM(CASE WHEN source LIKE 'udesk%' THEN 1 ELSE 0 END) as udesk_count
+      SUM(CASE WHEN sentiment = 'Positive' THEN 1 ELSE 0 END) as positive_count,
+      SUM(CASE WHEN sentiment = 'Neutral' THEN 1 ELSE 0 END) as neutral_count,
+      SUM(CASE WHEN sentiment = 'Negative' THEN 1 ELSE 0 END) as negative_count
     FROM voc_feedbacks
     WHERE app_id = ?
       AND process_status = 'analyzed'
+      AND feedback_time >= DATE_SUB(NOW(), INTERVAL ? ${interval})
+    GROUP BY date_key
+    ORDER BY date_key ASC
   `;
 
-  const params = [dateFormat, appId];
-
-  // 1. 情感筛选
-  if (sentiment && sentiment !== 'All') {
-    sql += ' AND sentiment = ?';
-    params.push(sentiment);
-  }
-
-  // 2. 时间筛选
-  sql += ` AND feedback_time >= DATE_SUB(NOW(), INTERVAL ? ${interval})`;
-  params.push(parseInt(limit) + 1);
-
-  sql += ` GROUP BY date_key ORDER BY date_key ASC`;
+  // 参数：时间格式, appId, 时间范围数值
+  const params = [dateFormat, appId, parseInt(limit) + 1];
 
   const [rows] = await pool.execute(sql, params);
   return rows;
 }
 
 /**
- * 获取统计概览 (Dashboard 顶部卡片)
+ * 获取统计概览 (保持不变)
  */
 export async function getVocStats(appId, month) {
   let sql = `
@@ -89,46 +84,9 @@ export async function getVocStats(appId, month) {
   };
 }
 
+
+
 // 兼容旧接口 (防止报错)
 export async function getVocTrend(appId, month, weeks) {
     return []; 
-}
-
-/**
- * 获取情感分布统计 (用于 Dashboard 饼图/柱状图)
- */
-export async function getSentimentDistribution({ appId, period = 'week', limit = 8 }) {
-  let interval;
-  switch (period) {
-    case 'day': interval = 'DAY'; break;
-    case 'month': interval = 'MONTH'; break;
-    case 'week': default: interval = 'WEEK'; break;
-  }
-
-  // 使用动态的时间范围，而不是写死的 12
-  const sql = `
-    SELECT 
-      sentiment,
-      COUNT(*) as count
-    FROM voc_feedbacks
-    WHERE app_id = ?
-      AND process_status = 'analyzed'
-      AND feedback_time >= DATE_SUB(NOW(), INTERVAL ? ${interval})
-    GROUP BY sentiment
-  `;
-
-  const [rows] = await pool.execute(sql, [appId, parseInt(limit) + 1]);
-  
-  const map = { Positive: 0, Neutral: 0, Negative: 0 };
-  rows.forEach(r => {
-    if (map[r.sentiment] !== undefined) {
-      map[r.sentiment] = r.count;
-    }
-  });
-
-  return [
-    { name: '好评', value: map.Positive, type: 'Positive' },
-    { name: '中评', value: map.Neutral, type: 'Neutral' },
-    { name: '差评', value: map.Negative, type: 'Negative' }
-  ];
 }

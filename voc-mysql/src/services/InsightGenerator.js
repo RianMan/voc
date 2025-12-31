@@ -5,54 +5,121 @@ import { DEPARTMENTS, getOwnersByDepartments } from '../config/departments.js';
 const client = new OpenAI({
   apiKey: process.env.DEEPSEEK_API_KEY, 
   baseURL: 'https://api.deepseek.com',
-  timeout: 120000 // 设置更长的超时时间，因为批量分析比较慢
+  timeout: 120000 // 2分钟超时
 });
 
-// ================== 1. 月度反馈提炼 (盲盒聚类) ==================
+// 辅助函数：休眠，防止 API 限流
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// ================== 1. 月度反馈提炼 (全量分批 + 二次聚合) ==================
 export async function generateMonthlyInsights(appId, monthStr) {
-  console.log(`🚀 [Insight] 开始生成反馈提炼: ${appId} - ${monthStr}`);
+  console.log(`🚀 [Insight] 开始生成全量反馈提炼: ${appId} - ${monthStr}`);
 
-  // 1. 获取数据
-  const [reviews] = await pool.execute(`
-    SELECT id, source, source_url, translated_content, content
-    FROM voc_feedbacks
-    WHERE app_id = ? 
-      AND risk_level IN ('High', 'Medium')
-      AND DATE_FORMAT(feedback_time, '%Y-%m') = ?
-    ORDER BY feedback_time DESC
-    LIMIT 500
-  `, [appId, monthStr]);
+  const BATCH_SIZE = 200; // 每批处理 200 条
+  let offset = 0;
+  let hasMore = true;
+  
+  // 临时存储所有批次的中间结果
+  let allIntermediateInsights = [];
+  let totalReviewsProcessed = 0;
 
-  if (reviews.length === 0) return { success: true, message: '暂无数据' };
+  // ---------------- Phase 1: 分批提取 (Map) ----------------
+  while (hasMore) {
+    // 1. 分页获取数据
+    const [reviews] = await pool.execute(`
+      SELECT id, translated_content, content
+      FROM voc_feedbacks
+      WHERE app_id = ? 
+        AND risk_level IN ('High', 'Medium')
+        AND DATE_FORMAT(feedback_time, '%Y-%m') = ?
+      ORDER BY feedback_time DESC
+      LIMIT ? OFFSET ?
+    `, [appId, monthStr, Number(BATCH_SIZE), Number(offset)]);
 
-  // 2. 准备 AI 输入
-  const aiInput = reviews.map(r => ({
-    id: r.id,
-    text: (r.translated_content || r.content || '').substring(0, 100)
-  }));
+    if (reviews.length === 0) {
+      hasMore = false;
+      break;
+    }
 
-  // 3. 调用 AI
-  const prompt = `
-    你是一位金融产品专家。请对以下 ${reviews.length} 条 MexiCash 用户反馈进行聚类分析。
+    console.log(`   📦 [Insight] 处理批次: ${offset} ~ ${offset + reviews.length}`);
+
+    // 2. 准备 AI 输入
+    const aiInput = reviews.map(r => ({
+      id: r.id,
+      text: (r.translated_content || r.content || '').substring(0, 150)
+    }));
+
+    const prompt = `
+      分析这 ${reviews.length} 条用户反馈。
+      请提取出最核心的 5-8 个痛点问题。
+      
+      返回 JSON:
+      {
+        "insights": [
+          { "title": "问题标题", "count": 出现次数, "sample_id": 代表性评论ID }
+        ]
+      }
+    `;
+
+    try {
+      const completion = await client.chat.completions.create({
+        model: 'deepseek-chat',
+        messages: [{ role: 'user', content: JSON.stringify(aiInput) + "\n\n" + prompt }],
+        response_format: { type: 'json_object' }
+      });
+      
+      const result = JSON.parse(completion.choices[0].message.content);
+      if (result.insights) {
+        // 补全样本内容，方便后续聚合
+        const enrichedInsights = result.insights.map(item => {
+          const sample = reviews.find(r => r.id === item.sample_id) || reviews[0];
+          return {
+            ...item,
+            sample_content: sample.content,
+            sample_translated: sample.translated_content,
+            sample_source: sample.source, // 假设 SQL 没查 source，需补上或忽略
+            sample_link: sample.source_url
+          };
+        });
+        allIntermediateInsights = allIntermediateInsights.concat(enrichedInsights);
+      }
+    } catch (e) {
+      console.error(`   ⚠️ 批次分析失败 (Offset ${offset}):`, e.message);
+    }
+
+    offset += BATCH_SIZE;
+    totalReviewsProcessed += reviews.length;
+    await sleep(1000); // 休息一下避免限流
+  }
+
+  if (allIntermediateInsights.length === 0) return { success: true, message: '无有效数据' };
+
+  console.log(`   🔄 [Insight] 初步提取完成，共 ${allIntermediateInsights.length} 个碎片观点，开始二次聚合...`);
+
+  // ---------------- Phase 2: 全局聚合 (Reduce) ----------------
+  // 将所有批次的碎片观点发给 AI，进行合并去重
+  const aggregationPrompt = `
+    以下是分批分析得到的用户反馈痛点列表（共 ${totalReviewsProcessed} 条评论）。
+    请将这些分散的痛点进行【合并同类项】和【二次聚类】，生成最终的 Top 8-12 月度洞察。
     
-    可选部门：${JSON.stringify(DEPARTMENTS)}
+    输入数据：
+    ${JSON.stringify(allIntermediateInsights.map(i => ({ title: i.title, count: i.count })))}
 
     任务：
-    1. 聚合相似问题，提炼出 Top 8-12 个核心痛点。
-    2. 问题标题(title)要专业具体（如"OTP验证码接收延迟"）。
-    3. 从原始数据中找到 1 条最具代表性的评论 ID (sample_id)。
-    4. 给出具体的优化建议 (suggestion)。
-    5. 分配 1-2 个相关部门。
-
+    1. 合并相似问题 (如 "收不到验证码" 和 "OTP没反应" 合并)。
+    2. 累加 Count 数量。
+    3. 重新拟定专业的标题。
+    4. 分配部门和建议。
+    
     返回 JSON:
     {
-      "insights": [
+      "final_insights": [
         {
-          "title": "问题标题",
-          "count": 数量,
-          "sample_id": ID,
-          "suggestion": "建议...",
-          "departments": ["产品", "UI"]
+          "title": "标准化标题",
+          "total_count": 合并后的总数,
+          "suggestion": "优化建议",
+          "departments": ["部门1"],
+          "original_titles": ["原标题1", "原标题2"] // 用于回溯找样本
         }
       ]
     }
@@ -61,25 +128,33 @@ export async function generateMonthlyInsights(appId, monthStr) {
   try {
     const completion = await client.chat.completions.create({
       model: 'deepseek-chat',
-      messages: [{ role: 'user', content: JSON.stringify(aiInput) + "\n\n" + prompt }],
+      messages: [{ role: 'user', content: aggregationPrompt }],
       response_format: { type: 'json_object' }
     });
 
-    const result = JSON.parse(completion.choices[0].message.content);
-    const insights = result.insights || [];
+    const finalResult = JSON.parse(completion.choices[0].message.content);
+    const finalInsights = finalResult.final_insights || [];
 
-    // 4. 入库
+    // ---------------- Phase 3: 入库 ----------------
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
       
+      // 清理旧数据
       await conn.execute(
         'DELETE FROM monthly_insights WHERE app_id = ? AND batch_month = ? AND task_id IS NULL',
         [appId, monthStr]
       );
 
-      for (const item of insights) {
-        const sampleReview = reviews.find(r => r.id === item.sample_id) || reviews[0];
+      for (const item of finalInsights) {
+        // 回溯找一个最佳样本：从原始碎片中，找到 title 匹配度最高的那个的样本
+        // 简单策略：在 intermediate 中找一个 original_titles 里的，或者直接找 title 相似的
+        const match = allIntermediateInsights.find(i => 
+          (item.original_titles && item.original_titles.includes(i.title)) || 
+          item.title.includes(i.title) || 
+          i.title.includes(item.title)
+        ) || allIntermediateInsights[0];
+
         const owners = getOwnersByDepartments(item.departments);
 
         await conn.execute(`
@@ -89,15 +164,15 @@ export async function generateMonthlyInsights(appId, monthStr) {
            ai_suggestion, departments, owners)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          monthStr, appId, item.title, item.count,
-          sampleReview.content, sampleReview.translated_content, sampleReview.source, sampleReview.source_url,
+          monthStr, appId, item.title, item.total_count,
+          match?.sample_content || '', match?.sample_translated || '', 'AI Aggregated', '',
           item.suggestion, JSON.stringify(item.departments), JSON.stringify(owners)
         ]);
       }
 
       await conn.commit();
-      console.log(`✅ [Insight] 已生成 ${insights.length} 条提炼数据`);
-      return { success: true, count: insights.length };
+      console.log(`✅ [Insight] 全量分析完成，生成 ${finalInsights.length} 条洞察`);
+      return { success: true, count: finalInsights.length };
 
     } catch (e) {
       await conn.rollback();
@@ -106,158 +181,180 @@ export async function generateMonthlyInsights(appId, monthStr) {
       conn.release();
     }
   } catch (err) {
-    console.error('[Insight] AI分析失败:', err);
+    console.error('[Insight] 聚合失败:', err);
     return { success: false, error: err.message };
   }
 }
 
-// ================== 2. 专题趋势 (AI 语义匹配) ==================
-/**
- * 升级版：使用 AI 进行语义匹配，而非 SQL LIKE
- */
+// ================== 2. 专题趋势 (全量分批 + 累加统计) ==================
 export async function generateTopicTrends(appId, monthStr) {
-  console.log(`🚀 [Topic] 开始生成专题趋势 (AI语义版): ${appId} - ${monthStr}`);
+  console.log(`🚀 [Topic] 开始生成全量专题子问题分析: ${appId} - ${monthStr}`);
 
-  // 1. 获取所有启用的专题
+  // 1. 获取专题配置
   const [topics] = await pool.execute(
     'SELECT id, name, keywords FROM topic_configs WHERE is_active = 1'
   );
+  if (topics.length === 0) return { success: false, message: '未配置任何专题' };
 
-  if (topics.length === 0) {
-    return { success: false, message: '未配置任何专题' };
-  }
+  // 2. 准备全局聚合容器 Map<Key, Data>
+  // Key = `${topic_id}::${sub_issue_title}`
+  const globalStats = new Map();
 
-  // 2. 获取本月所有评论 (分批处理，避免 Token 爆炸)
-  // 这里我们一次取 200 条作为样本，如果数据量巨大，建议改为循环分批处理
-  const [reviews] = await pool.execute(`
-    SELECT id, source, source_url, translated_content, content
-    FROM voc_feedbacks
-    WHERE app_id = ? 
-      AND DATE_FORMAT(feedback_time, '%Y-%m') = ?
-    ORDER BY feedback_time DESC
-    LIMIT 300 
-  `, [appId, monthStr]);
+  const BATCH_SIZE = 200;
+  let offset = 0;
+  let hasMore = true;
 
-  if (reviews.length === 0) return { success: true, message: '本月无数据' };
+  // ---------------- Phase 1: 循环分批处理 ----------------
+  while (hasMore) {
+    // 分页查数据
+    const [reviews] = await pool.execute(`
+      SELECT id, source, source_url, translated_content, content
+      FROM voc_feedbacks
+      WHERE app_id = ? 
+        AND DATE_FORMAT(feedback_time, '%Y-%m') = ?
+      ORDER BY feedback_time DESC
+      LIMIT ? OFFSET ?
+    `, [appId, monthStr, Number(BATCH_SIZE), Number(offset)]);
 
-  console.log(`   📦 待分析样本: ${reviews.length} 条 | 专题数: ${topics.length} 个`);
+    if (reviews.length === 0) {
+      hasMore = false;
+      break;
+    }
 
-  // 3. 构建 AI 请求数据
-  // 简化评论内容，只保留 id 和 文本
-  const reviewInputs = reviews.map(r => ({
-    id: r.id,
-    text: (r.translated_content || r.content || '').substring(0, 150) // 限制长度
-  }));
+    console.log(`   📦 [Topic] 分析批次: ${offset} ~ ${offset + reviews.length}`);
 
-  // 简化专题内容
-  const topicInputs = topics.map(t => ({
-    id: t.id,
-    name: t.name,
-    desc: `关键词参考: ${t.keywords}` // 告诉 AI 这些关键词只是参考，语义符合也要算
-  }));
+    // AI 请求
+    const reviewInputs = reviews.map(r => ({
+      id: r.id,
+      text: (r.translated_content || r.content || '').substring(0, 150)
+    }));
 
-  const prompt = `
-    你是一个智能分类助手。请根据语义，将评论分配到对应的专题中。
-    
-    【待匹配专题列表】：
-    ${JSON.stringify(topicInputs)}
+    const topicInputs = topics.map(t => ({
+      id: t.id,
+      name: t.name,
+      desc: `关键词参考: ${t.keywords}`
+    }));
 
-    【评论列表】：
-    ${JSON.stringify(reviewInputs)}
+    const prompt = `
+      【任务】：对 ${reviews.length} 条评论进行专题匹配和子问题拆分。
+      
+      【专题列表】：${JSON.stringify(topicInputs)}
+      【可选部门】：${JSON.stringify(DEPARTMENTS)}
 
-    【可选部门】：${JSON.stringify(DEPARTMENTS)}
+      要求：
+      1. 判断评论属于哪个专题。
+      2. 在专题下拆分具体子问题（如"催收" -> "未到期催收"）。
+      3. 统计本批次数量。
+      4. 即使只有一个评论匹配，也要记录。
 
-    任务要求：
-    1. 遍历每一条评论，判断它是否属于某个或多个专题。
-    2. 匹配逻辑：**不要局限于关键词**，要理解语义。例如"闪退"、"很卡"都属于"APP体验"专题。
-    3. 统计每个专题命中的评论ID。
-    4. 对每个命中的专题，生成一份分析报告（痛点总结、建议、部门）。
+      返回 JSON:
+      {
+        "results": [
+          {
+            "topic_id": 专题ID,
+            "sub_issue_title": "子问题标题", 
+            "count": 本批次数量,
+            "sample_id": 本批次中典型的评论ID,
+            "suggestion": "建议",
+            "departments": ["部门"]
+          }
+        ]
+      }
+    `;
 
-    返回 JSON 格式：
-    {
-      "results": [
-        {
-          "topic_id": 专题ID,
-          "matched_review_ids": [101, 102, ...],
-          "sample_id": 最典型的一条评论ID,
-          "suggestion": "针对该专题的优化建议...",
-          "departments": ["部门1"]
+    try {
+      const completion = await client.chat.completions.create({
+        model: 'deepseek-chat',
+        messages: [{ role: 'user', content: JSON.stringify(reviewInputs) + "\n\n" + prompt }],
+        response_format: { type: 'json_object' }
+      });
+      
+      const aiResult = JSON.parse(completion.choices[0].message.content);
+      const batchResults = aiResult.results || [];
+
+      // ---------------- 核心逻辑：累加到全局 Map ----------------
+      for (const res of batchResults) {
+        // 归一化 Key：TopicID + 子问题标题
+        const key = `${res.topic_id}::${res.sub_issue_title}`;
+
+        if (!globalStats.has(key)) {
+          // 如果是第一次遇到这个子问题，初始化
+          const sample = reviews.find(r => r.id === res.sample_id) || reviews[0];
+          globalStats.set(key, {
+            topic_id: res.topic_id,
+            sub_issue_title: res.sub_issue_title,
+            total_count: 0,
+            sample_content: sample?.content || '',
+            sample_translated: sample?.translated_content || '',
+            sample_source: sample?.source || '',
+            sample_link: sample?.source_url || '',
+            suggestion: res.suggestion,
+            departments: res.departments
+          });
         }
-      ]
-    }
-    注意：如果没有评论匹配某个专题，该专题可以不返回或返回空列表。
-  `;
 
-  try {
-    const completion = await client.chat.completions.create({
-      model: 'deepseek-chat',
-      messages: [{ role: 'user', content: prompt }],
-      response_format: { type: 'json_object' }
-    });
-
-    let aiResult;
-    try {
-      aiResult = JSON.parse(completion.choices[0].message.content);
-    } catch (parseErr) {
-      console.error('JSON解析失败，AI返回:', completion.choices[0].message.content);
-      throw new Error('AI返回格式错误');
-    }
-
-    const results = aiResult.results || [];
-    console.log(`   🤖 AI 分析完成，命中 ${results.length} 个专题`);
-
-    // 4. 入库
-    const conn = await pool.getConnection();
-    try {
-      await conn.beginTransaction();
-
-      // 清理旧数据
-      await conn.execute(
-        'DELETE FROM topic_trends WHERE app_id = ? AND batch_month = ? AND task_id IS NULL',
-        [appId, monthStr]
-      );
-
-      let totalHits = 0;
-
-      for (const res of results) {
-        const matchedIds = res.matched_review_ids || [];
-        if (matchedIds.length === 0) continue;
-
-        // 找到对应的专题配置信息
-        const topicConfig = topics.find(t => t.id === res.topic_id);
-        if (!topicConfig) continue;
-
-        // 找到样本评论信息
-        const sampleReview = reviews.find(r => r.id === res.sample_id) || reviews.find(r => r.id === matchedIds[0]);
-        const owners = getOwnersByDepartments(res.departments);
-
-        await conn.execute(`
-          INSERT INTO topic_trends 
-          (topic_config_id, topic_name, batch_month, app_id, issue_count,
-           sample_content, sample_translated, sample_source, sample_link,
-           ai_suggestion, departments, owners)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          topicConfig.id, topicConfig.name, monthStr, appId, matchedIds.length,
-          sampleReview?.content || '', sampleReview?.translated_content || '', sampleReview?.source || '', sampleReview?.source_url || '',
-          res.suggestion || '暂无建议', JSON.stringify(res.departments || []), JSON.stringify(owners)
-        ]);
-
-        totalHits++;
+        // 累加数量
+        const entry = globalStats.get(key);
+        entry.total_count += res.count;
+        
+        // 可以在这里做个判断：如果后来的批次有更好的建议，也可以更新 entry.suggestion
       }
 
-      await conn.commit();
-      return { success: true, count: totalHits };
-
     } catch (e) {
-      await conn.rollback();
-      throw e;
-    } finally {
-      conn.release();
+      console.error(`   ⚠️ [Topic] 批次分析失败 (Offset ${offset}):`, e.message);
     }
 
-  } catch (err) {
-    console.error('[Topic] 处理失败:', err);
-    return { success: false, error: err.message };
+    offset += BATCH_SIZE;
+    await sleep(800); // 避免并发过高
+  }
+
+  console.log(`   🔄 [Topic] 全量扫描结束，共发现 ${globalStats.size} 个子问题类型，开始入库...`);
+
+  // ---------------- Phase 2: 批量入库 ----------------
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    await conn.execute(
+      'DELETE FROM topic_trends WHERE app_id = ? AND batch_month = ? AND task_id IS NULL',
+      [appId, monthStr]
+    );
+
+    for (const item of globalStats.values()) {
+      const topicConfig = topics.find(t => t.id === item.topic_id);
+      if (!topicConfig) continue;
+
+      const owners = getOwnersByDepartments(item.departments);
+
+      await conn.execute(`
+        INSERT INTO topic_trends 
+        (topic_config_id, topic_name, batch_month, app_id, issue_count,
+         sample_content, sample_translated, sample_source, sample_link,
+         ai_suggestion, departments, owners)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        item.topic_id,
+        item.sub_issue_title || topicConfig.name, // 存储子问题标题
+        monthStr,
+        appId,
+        item.total_count, // 这里存的是全月累加后的总数
+        item.sample_content,
+        item.sample_translated,
+        item.sample_source,
+        item.sample_link,
+        item.suggestion,
+        JSON.stringify(item.departments || []),
+        JSON.stringify(owners)
+      ]);
+    }
+
+    await conn.commit();
+    return { success: true, count: globalStats.size };
+
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
   }
 }

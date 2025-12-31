@@ -1,8 +1,9 @@
+// 文件：pages/Dashboard.jsx
 import React, { useState, useEffect } from 'react';
 import { 
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell 
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
-import { fetchTrendAnalysis, fetchSentimentStats } from '../services/api';
+import { fetchTrendAnalysis } from '../services/api';
 import { Loader2, TrendingUp, BarChart3, PieChart as PieIcon } from 'lucide-react';
 import { Select, Radio } from 'antd';
 
@@ -12,20 +13,18 @@ export const Dashboard = () => {
   ]);
   const [selectedApp, setSelectedApp] = useState('com.mexicash.app');
   
-  // 筛选状态
+  // 筛选状态 (去掉了 sentiment 筛选，因为现在是看整体比率)
   const [period, setPeriod] = useState('week'); // 'day', 'week', 'month'
-  const [sentiment, setSentiment] = useState('Positive'); // 'Positive', 'Neutral', 'Negative'
   
   // 数据状态
   const [chartData, setChartData] = useState([]);
-  const [sentimentData, setSentimentData] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (selectedApp) {
       loadAnalysisData();
     }
-  }, [selectedApp, period, sentiment]); // 监听变化
+  }, [selectedApp, period]);
 
   const loadAnalysisData = async () => {
     setLoading(true);
@@ -33,56 +32,36 @@ export const Dashboard = () => {
     const limit = period === 'day' ? 14 : (period === 'month' ? 12 : 8);
     
     try {
-      const [trendRes, sentimentRes] = await Promise.all([
-        // 折线图接口
-        fetchTrendAnalysis({ appId: selectedApp, period, sentiment, limit }),
-        // ✅ 柱状图接口 (现在也传 limit 了，实现时间联动)
-        fetchSentimentStats({ appId: selectedApp, period, limit }) 
-      ]);
+      // ✅ 只需要调用这一个接口，数据就全有了
+      const trendRes = await fetchTrendAnalysis({ appId: selectedApp, period, limit });
 
       if (trendRes.success) {
-        // 格式化数据，确保是数字
-        const formatted = trendRes.data.map(item => ({
-          ...item,
-          total_count: Number(item.total_count),
-          google_count: Number(item.google_count),
-          udesk_count: Number(item.udesk_count)
-        }));
+        // 格式化数据，并计算好评率/差评率
+        const formatted = trendRes.data.map(item => {
+          const total = Number(item.total_count) || 1; // 防止除以0
+          const pos = Number(item.positive_count) || 0;
+          const neg = Number(item.negative_count) || 0;
+          const neu = Number(item.neutral_count) || 0;
+          
+          return {
+            ...item,
+            date_key: item.date_key,
+            total_count: total,
+            positive_count: pos,
+            negative_count: neg,
+            neutral_count: neu,
+            // ✅ 计算比率 (保留1位小数)
+            positive_rate: ((pos / total) * 100).toFixed(1),
+            negative_rate: ((neg / total) * 100).toFixed(1)
+          };
+        });
         setChartData(formatted);
-      }
-
-      if (sentimentRes.success) {
-        setSentimentData(sentimentRes.data);
       }
     } catch (e) {
       console.error('加载失败', e);
     } finally {
       setLoading(false);
     }
-  };
-
-  // 左下角：来源分布 (根据折线图数据计算)
-  const totalSummary = chartData.reduce((acc, curr) => ({
-    google: acc.google + curr.google_count,
-    udesk: acc.udesk + curr.udesk_count,
-    total: acc.total + curr.total_count
-  }), { google: 0, udesk: 0, total: 0 });
-
-  const sourceData = [
-    { name: 'Google Play', value: totalSummary.google, color: '#10b981' },
-    { name: 'Udesk', value: totalSummary.udesk, color: '#3b82f6' }
-  ];
-
-  const SENTIMENT_COLORS = {
-    '好评': '#10b981',
-    '中评': '#94a3b8',
-    '差评': '#ef4444'
-  };
-  
-  const getCurrentTrendColor = () => {
-    if (sentiment === 'Positive') return '#10b981';
-    if (sentiment === 'Negative') return '#ef4444';
-    return '#94a3b8';
   };
 
   return (
@@ -101,23 +80,13 @@ export const Dashboard = () => {
             options={apps.map(app => ({ label: app.appName, value: app.appId }))}
           />
         </div>
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 font-medium">时间:</span>
-            <Radio.Group value={period} onChange={e => setPeriod(e.target.value)} size="small" buttonStyle="solid">
-              <Radio.Button value="day">日</Radio.Button>
-              <Radio.Button value="week">周</Radio.Button>
-              <Radio.Button value="month">月</Radio.Button>
-            </Radio.Group>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 font-medium">折线图指标:</span>
-            <Radio.Group value={sentiment} onChange={e => setSentiment(e.target.value)} size="small" buttonStyle="solid">
-              <Radio.Button value="Positive">好评</Radio.Button>
-              <Radio.Button value="Neutral">中评</Radio.Button>
-              <Radio.Button value="Negative">差评</Radio.Button>
-            </Radio.Group>
-          </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500 font-medium">时间维度:</span>
+          <Radio.Group value={period} onChange={e => setPeriod(e.target.value)} size="small" buttonStyle="solid">
+            <Radio.Button value="day">日</Radio.Button>
+            <Radio.Button value="week">周</Radio.Button>
+            <Radio.Button value="month">月</Radio.Button>
+          </Radio.Group>
         </div>
       </div>
 
@@ -126,85 +95,88 @@ export const Dashboard = () => {
           <Loader2 className="animate-spin text-blue-600" size={32} />
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+        <div className="flex flex-col gap-6">
           
-          {/* 1. 趋势折线图 */}
-          <div className="xl:col-span-3 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-            <h3 className="text-lg font-bold mb-6 flex items-center gap-2" style={{ color: '#1e293b' }}>
-              <TrendingUp size={20} style={{ color: getCurrentTrendColor() }} />
-              <span className="mr-2">
-                {sentiment === 'Positive' ? '好评' : sentiment === 'Negative' ? '差评' : '中评'}趋势
-              </span>
-              <span className="text-xs font-normal text-slate-400 bg-slate-100 px-2 py-1 rounded">
-                (Google Play & Udesk)
-              </span>
+          {/* 1. 好评率/差评率趋势 (折线图) */}
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+            <h3 className="text-lg font-bold mb-6 flex items-center gap-2 text-slate-800">
+              <TrendingUp size={20} className="text-blue-600" />
+              <span>口碑趋势分析 (好评率 vs 差评率)</span>
             </h3>
             
-            <div className="h-[300px] w-full">
+            <div className="h-[320px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                {/* ✅ 关键：加 key 强制刷新，解决“切换无效果”的视觉问题 */}
                 <LineChart 
-                  key={period + sentiment} 
                   data={chartData} 
-                  margin={{ top: 5, right: 20, bottom: 5, left: 0 }}
+                  margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="date_key" tick={{ fontSize: 12 }} tickMargin={10} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                  <Legend />
-                  <Line type="monotone" dataKey="total_count" name="总量" stroke={getCurrentTrendColor()} strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                  <Line type="monotone" dataKey="google_count" name="Google Play" stroke="#10b981" strokeWidth={1} dot={false} strokeDasharray="3 3" />
-                  <Line type="monotone" dataKey="udesk_count" name="Udesk" stroke="#3b82f6" strokeWidth={1} dot={false} strokeDasharray="3 3" />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <XAxis dataKey="date_key" tick={{ fontSize: 12, fill: '#64748b' }} tickMargin={10} />
+                  <YAxis 
+                    unit="%" 
+                    tick={{ fontSize: 12, fill: '#64748b' }} 
+                    domain={[0, 100]} // Y轴固定 0-100%
+                  />
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                    formatter={(value) => [`${value}%`]}
+                  />
+                  <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                  
+                  {/* 好评率 - 绿色 */}
+                  <Line 
+                    type="monotone" 
+                    dataKey="positive_rate" 
+                    name="好评率" 
+                    stroke="#10b981" 
+                    strokeWidth={3} 
+                    dot={{ r: 4, strokeWidth: 2 }} 
+                    activeDot={{ r: 6 }} 
+                  />
+                  
+                  {/* 差评率 - 红色 */}
+                  <Line 
+                    type="monotone" 
+                    dataKey="negative_rate" 
+                    name="差评率" 
+                    stroke="#ef4444" 
+                    strokeWidth={3} 
+                    dot={{ r: 4, strokeWidth: 2 }} 
+                    activeDot={{ r: 6 }} 
+                  />
                 </LineChart>
               </ResponsiveContainer>
             </div>
           </div>
 
-          {/* 2. 来源分布 */}
+          {/* 2. 情感分布堆积图 (柱状图) */}
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-800 mb-4">
-              来源分布 
-              <span className="text-xs font-normal text-slate-400 ml-2">({period === 'day' ? '近14天' : period === 'month' ? '近1年' : '近8周'})</span>
-            </h3>
-            <div className="h-[200px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart key={period} data={sourceData} layout="vertical" margin={{ left: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
-                  <XAxis type="number" hide />
-                  <YAxis dataKey="name" type="category" width={80} tick={{ fontSize: 12 }} />
-                  <Tooltip cursor={{ fill: 'transparent' }} />
-                  <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={30}>
-                    {sourceData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* 3. 情感分布对比 (✅ 现在支持时间切换了) */}
-          <div className="xl:col-span-2 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <PieIcon size={20} className="text-slate-500" />
-              情感分布对比 
+              <PieIcon size={20} className="text-purple-600" />
+              <span>情感分布走势</span>
               <span className="text-xs font-normal text-slate-400">
-                ({period === 'day' ? '近14天' : period === 'month' ? '近1年' : '近8周'})
+                (总量堆积)
               </span>
             </h3>
-            <div className="h-[200px] w-full">
+            <div className="h-[320px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart key={period} data={sentimentData} layout="vertical" margin={{ left: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
-                  <XAxis type="number" hide />
-                  <YAxis dataKey="name" type="category" width={40} tick={{ fontSize: 12, fontWeight: 'bold' }} />
-                  <Tooltip cursor={{ fill: 'transparent' }} />
-                  <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={30} label={{ position: 'right' }}>
-                    {sentimentData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={SENTIMENT_COLORS[entry.name]} />
-                    ))}
-                  </Bar>
+                <BarChart 
+                  data={chartData} 
+                  margin={{ top: 20, right: 30, left: 0, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <XAxis dataKey="date_key" tick={{ fontSize: 12, fill: '#64748b' }} tickMargin={10} />
+                  <YAxis tick={{ fontSize: 12, fill: '#64748b' }} />
+                  <Tooltip 
+                    cursor={{ fill: '#f1f5f9' }}
+                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                  />
+                  <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                  
+                  {/* 堆积柱状图 stackId 必须相同 */}
+                  <Bar dataKey="negative_count" name="差评数" stackId="a" fill="#ef4444" barSize={40} />
+                  <Bar dataKey="neutral_count" name="中评数" stackId="a" fill="#94a3b8" barSize={40} />
+                  <Bar dataKey="positive_count" name="好评数" stackId="a" fill="#10b981" radius={[4, 4, 0, 0]} barSize={40} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

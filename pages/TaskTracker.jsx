@@ -1,8 +1,13 @@
+// src/pages/TaskTracker.jsx
 import React, { useEffect, useState } from 'react';
 import { Table, Tag, Progress, Button, Modal, Form, Input, DatePicker, Select, message } from 'antd';
 import { fetchTasks, updateTask } from '../services/api';
 import { Edit } from 'lucide-react';
 import dayjs from 'dayjs';
+import isBetween from 'dayjs/plugin/isBetween';
+
+// 启用 dayjs 区间判断插件
+dayjs.extend(isBetween);
 
 const { TextArea } = Input;
 const { Option } = Select;
@@ -11,6 +16,9 @@ export const TaskTracker = () => {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   
+  // 筛选状态
+  const [dateRange, setDateRange] = useState(null);
+
   // 编辑弹窗状态
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -64,17 +72,26 @@ export const TaskTracker = () => {
     }
   };
 
+  // 前端过滤逻辑：根据开始时间筛选
+  const filteredTasks = tasks.filter(task => {
+    if (!dateRange || dateRange.length === 0) return true;
+    
+    const taskStart = dayjs(task.start_date);
+    const [start, end] = dateRange;
+    
+    // 只要任务开始时间在筛选范围内即可 (包含边界)
+    return taskStart.isBetween(start, end, 'day', '[]');
+  });
+
   const columns = [
     { 
       title: '问题来源', 
       dataIndex: 'original_problem', 
       width: 180,
-      render: (t, r) => (
+      render: (t) => (
         <div>
           <div className="font-medium text-slate-700">{t}</div>
-          <Tag className="mt-1" color={r.source_type === 'topic' ? 'purple' : 'blue'}>
-            {r.source_type === 'topic' ? '专题' : '提炼'}
-          </Tag>
+          {/* 已确认删除 专题/提炼 的 Tag */}
         </div>
       )
     },
@@ -99,6 +116,8 @@ export const TaskTracker = () => {
         const start = new Date(r.start_date).getTime();
         const end = new Date(r.end_date).getTime();
         const now = Date.now();
+        
+        // ✅ 修正了这里的变量定义错误
         let percent = 0;
         if (end > start) percent = Math.min(100, Math.max(0, ((now - start) / (end - start)) * 100));
         
@@ -133,10 +152,23 @@ export const TaskTracker = () => {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-slate-800 mb-6">事项跟进</h2>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold text-slate-800">事项跟进</h2>
+        
+        {/* 时间筛选器 */}
+        <div className="flex items-center gap-2">
+          <span className="text-slate-500 text-sm">开始时间：</span>
+          <DatePicker.RangePicker 
+            value={dateRange}
+            onChange={setDateRange}
+            placeholder={['开始日期', '结束日期']}
+          />
+        </div>
+      </div>
+
       <Table 
         columns={columns} 
-        dataSource={tasks} 
+        dataSource={filteredTasks} 
         rowKey="id" 
         loading={loading} 
         scroll={{ x: 1200 }}
