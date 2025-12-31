@@ -1,28 +1,11 @@
-/**
- * 数据库模块统一导出
- * 保持向后兼容，所有旧代码的 import 不需要修改
- */
-
-// 导出连接池
+// 1. 导出连接池
 export { default as pool, default } from './connection.js';
 
-// 导出工具函数
-export * from './utils.js';
-
-// 导出用户管理
+// 2. 导出用户管理 (登录注册)
 export * from './users.js';
 
-// 导出 VOC 数据查询
+// 3. 导出工具函数 (加密)
+export * from './utils.js';
+
+// 4. ✅ 关键：导出反馈查询 (趋势图、统计)
 export * from './feedbacks.js';
-
-// 导出状态管理
-export * from './status.js';
-
-// 导出报告存档
-export * from './reports.js';
-
-// 导出 AI 费用
-export * from './costs.js';
-
-// 导出 App 配置
-export * from './apps.js';

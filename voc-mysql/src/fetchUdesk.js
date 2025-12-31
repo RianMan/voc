@@ -1,259 +1,151 @@
-import pool from './db/index.js';
+import pool from './db/connection.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-// ==================== 配置区域 ====================
+// ================= 配置区域 =================
 
-/**
- * 数据源配置
- * 每个国家一个 API 地址，包含该国家下的所有 channel（app）
- */
-const DATA_SOURCES = [
-  {
-    country: 'CN',
-    apiUrl: process.env.UDESK_API_CN || 'http://crm.kuainiu.io/backend/goapi/udesk/im-query-message',
+const UDESK_CONFIG = {
+    // ✅ 修正 1: 更新为真实的生产环境 API 地址
+    apiUrl: 'http://biz-crm.mxgbus.com/backend/goapi/udesk/im-query-message',
     channels: [
-      { name: '芸豆', appId: 'com.yundou.cn', appName: '芸豆' }
-      // 未来可以添加中国区其他 app
+        { name: 'MexiCash', appId: 'com.mexicash.app', appName: 'MexiCash', country: 'MX' }
     ]
-  },
-  // 未来其他国家的配置示例：
-  // {
-  //   country: 'PK',
-  //   apiUrl: process.env.UDESK_API_PK || 'http://pk.example.com/api/udesk',
-  //   channels: [
-  //     { name: 'SmartQarza', appId: 'com.creditcat.tech.app', appName: 'SmartQarza' }
-  //   ]
-  // },
-  // {
-  //   country: 'MX',
-  //   apiUrl: process.env.UDESK_API_MX || 'http://mx.example.com/api/udesk',
-  //   channels: [
-  //     { name: 'MexiCash', appId: 'com.mexicash.app', appName: 'MexiCash' }
-  //   ]
-  // }
-];
+};
 
-// ==================== 核心函数 ====================
-
-/**
- * 获取上周的日期范围
- */
-function getLastWeekRange() {
-  const today = new Date();
-  const lastMonday = new Date(today);
-  lastMonday.setDate(today.getDate() - today.getDay() - 6); // 上周一
-  lastMonday.setHours(0, 0, 0, 0);
-  
-  const lastSunday = new Date(lastMonday);
-  lastSunday.setDate(lastMonday.getDate() + 6); // 上周日
-  lastSunday.setHours(23, 59, 59, 999);
-  
-  return {
-    start: lastMonday.toISOString().split('T')[0],
-    end: lastSunday.toISOString().split('T')[0]
-  };
+// ✅ 修正 2: 获取"本月"的时间范围 (从本月1号到今天)
+function getDateRange() {
+    const now = new Date();
+    // 本月第一天
+    const start = new Date(now.getFullYear(), now.getMonth(), 1); 
+    // 今天 (结束时间)
+    const end = new Date(); 
+    
+    // 格式化为 YYYY-MM-DD
+    const formatDate = (d) => d.toISOString().split('T')[0];
+    
+    return {
+        start: formatDate(start),
+        end: formatDate(end)
+    };
 }
 
-/**
- * 调用 Udesk API 获取数据
- */
-async function fetchUdeskPage(apiUrl, channel, startDate, endDate, page = 1, pageSize = 100) {
-  try {
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        start_time: `${startDate} 00:00:00`,
-        end_time: `${endDate} 23:59:59`,
-        customer_channel: channel,
-        page,
-        page_size: pageSize
-      })
-    });
+// ================= 核心逻辑 =================
 
-    if (!response.ok) {
-      throw new Error(`API 请求失败: ${response.status}`);
+async function fetchUdeskPage(apiUrl, channelName, startDate, endDate, page = 1) {
+    try {
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                start_time: `${startDate} 00:00:00`,
+                end_time: `${endDate} 23:59:59`,
+                customer_channel: channelName,
+                page,
+                page_size: 100 // 每页抓100条
+            })
+        });
+        const json = await response.json();
+        return json.code === 0 ? json.data : null;
+    } catch (e) {
+        console.error('API Error:', e.message);
+        return null;
     }
-
-    const result = await response.json();
-    
-    if (result.code !== 0) {
-      throw new Error(`API 返回错误: ${result.message}`);
-    }
-
-    return result.data;
-  } catch (error) {
-    console.error(`❌ 请求失败 [${channel}]:`, error.message);
-    return null;
-  }
 }
 
-/**
- * 分页获取所有会话数据
- */
-async function fetchAllSessions(apiUrl, channel, startDate, endDate) {
-  const allSessions = [];
-  let page = 1;
-  const pageSize = 100;
-  
-  console.log(`  📥 开始分页获取...`);
-  
-  while (true) {
-    const data = await fetchUdeskPage(apiUrl, channel, startDate, endDate, page, pageSize);
+async function saveSessions(sessions, appConfig) {
+    if (!sessions || sessions.length === 0) return 0;
     
-    if (!data || !data.list || data.list.length === 0) {
-      break;
-    }
+    let count = 0;
+    const conn = await pool.getConnection();
     
-    allSessions.push(...data.list);
-    console.log(`    第 ${page} 页: ${data.list.length} 条 (总计 ${allSessions.length}/${data.total})`);
-    
-    // 如果已经获取所有数据，退出
-    if (allSessions.length >= data.total) {
-      break;
-    }
-    
-    page++;
-  }
-  
-  return allSessions;
-}
+    try {
+        for (const session of sessions) {
+            // ✅ 修正 3: 适配真实数据结构
+            // 真实数据的 content_type 是 "message" 而不是 "text"
+            const userMsg = session.messages.find(m => 
+                m.sender === 'customer' && 
+                (m.content_type === 'message' || m.content_type === 'text')
+            );
+            
+            // 如果没找到用户发的消息，给一个默认提示，防止内容为空
+            const mainContent = userMsg ? userMsg.content_text : '(用户发送了图片/语音或无发言)';
 
-/**
- * 保存会话到数据库
- */
-async function saveSessions(sessions, channel, appId, appName, country) {
-  if (sessions.length === 0) {
-    console.log(`  ⚠️  无数据可保存`);
-    return 0;
-  }
+            // 1. 插入主表 (IGNORE 避免重复，基于 source + external_id)
+            const [res] = await conn.execute(`
+                INSERT IGNORE INTO voc_feedbacks 
+                (source, external_id, source_url, app_id, app_name, country, 
+                 user_name, content, feedback_time, process_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'raw')
+            `, [
+                'udesk_chat',
+                String(session.session_id),
+                '', // Udesk工单链接暂时留空，或者你可以自己拼一个后台链接
+                appConfig.appId,
+                appConfig.appName,
+                appConfig.country,
+                session.customer_name || 'Guest',
+                mainContent, // 这是分析脚本主要看的内容
+                new Date(session.session_created_at)
+            ]);
 
-  console.log(`  💾 开始入库 ${sessions.length} 条会话...`);
-  
-  let newCount = 0;
-  const conn = await pool.getConnection();
+            // 只有当是新插入的数据时，才处理消息详情 (affectedRows > 0)
+            if (res.affectedRows > 0) {
+                count++;
+                const feedbackId = res.insertId;
 
-  try {
-    for (const session of sessions) {
-      // 检查是否已存在
-      const [exists] = await conn.query(
-        'SELECT id FROM voc_feedbacks WHERE source = ? AND external_id = ?',
-        ['udesk_chat', String(session.session_id)]
-      );
-
-      if (exists.length > 0) {
-        continue; // 跳过重复数据
-      }
-
-      // 插入主表
-      const [result] = await conn.execute(
-        `INSERT INTO voc_feedbacks 
-         (source, external_id, source_url, app_id, app_name, country, 
-          user_name, feedback_time, process_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'raw')`,
-        [
-          'udesk_chat',
-          String(session.session_id),
-          `https://udesk.example.com/session/${session.session_id}`, // 可以配置实际的工单链接
-          appId,
-          appName,
-          country,
-          session.customer_name || 'Guest',
-          new Date(session.session_created_at)
-        ]
-      );
-
-      const feedbackId = result.insertId;
-
-      // 插入所有消息（保留完整对话）
-      for (let i = 0; i < session.messages.length; i++) {
-        const msg = session.messages[i];
-        
-        // 跳过系统消息
-        if (msg.sender === 'sys') {
-          continue;
+                // 2. 插入完整对话记录 (保留上下文)
+                for (const msg of session.messages) {
+                    // 跳过系统自动回复，保留 agent(客服) 和 customer(用户)
+                    if (msg.sender === 'sys') continue; 
+                    
+                    await conn.execute(`
+                        INSERT INTO voc_feedback_messages (feedback_id, role, content)
+                        VALUES (?, ?, ?)
+                    `, [
+                        feedbackId,
+                        msg.sender === 'customer' ? 'user' : 'agent',
+                        msg.content_text
+                    ]);
+                }
+            }
         }
-        
-        await conn.execute(
-          `INSERT INTO voc_feedback_messages 
-           (feedback_id, sequence_num, role, content)
-           VALUES (?, ?, ?, ?)`,
-          [
-            feedbackId,
-            i + 1,
-            msg.sender === 'customer' ? 'user' : 'agent',
-            msg.content_text
-          ]
-        );
-      }
-
-      newCount++;
+    } catch (e) {
+        console.error('入库失败:', e);
+    } finally {
+        conn.release();
     }
-    
-    console.log(`  ✅ 新增 ${newCount} 条 (跳过 ${sessions.length - newCount} 条重复)`);
-    return newCount;
-  } catch (error) {
-    console.error(`  ❌ 入库失败:`, error.message);
-    return 0;
-  } finally {
-    conn.release();
-  }
+    return count;
 }
 
-/**
- * 主函数
- */
 async function main() {
-  console.log('🚀 开始 Udesk 数据同步任务\n');
-  
-  // 获取上周日期范围
-  const { start, end } = getLastWeekRange();
-  console.log(`📅 时间范围: ${start} ~ ${end}\n`);
-  
-  let totalImported = 0;
-  
-  // 遍历所有数据源
-  for (const source of DATA_SOURCES) {
-    console.log(`\n🌍 国家: ${source.country} (${source.apiUrl})`);
-    
-    // 遍历该国家下的所有 channel
-    for (const channel of source.channels) {
-      console.log(`\n📱 Channel: ${channel.name}`);
-      
-      try {
-        // 1. 获取数据
-        const sessions = await fetchAllSessions(
-          source.apiUrl, 
-          channel.name, 
-          start, 
-          end
-        );
+    const { start, end } = getDateRange();
+    console.log(`🚀 开始抓取 Udesk 数据 (${start} ~ ${end})...`);
+
+    for (const channel of UDESK_CONFIG.channels) {
+        console.log(`\n📱 正在处理渠道: ${channel.name}`);
+        let page = 1;
         
-        // 2. 保存数据
-        const imported = await saveSessions(
-          sessions,
-          channel.name,
-          channel.appId,
-          channel.appName,
-          source.country
-        );
-        
-        totalImported += imported;
-        
-      } catch (error) {
-        console.error(`❌ ${channel.name} 处理失败:`, error.message);
-      }
+        while (true) {
+            const data = await fetchUdeskPage(UDESK_CONFIG.apiUrl, channel.name, start, end, page);
+            
+            if (!data || !data.list || data.list.length === 0) {
+                console.log('   - 无更多数据');
+                break;
+            }
+
+            const saved = await saveSessions(data.list, channel);
+            console.log(`   - 第 ${page} 页: 获取 ${data.list.length} 条，新入库 ${saved} 条`);
+            
+            // 如果当前页不满 100 条，或者已经到了最后一页
+            if (data.list.length < 100 || page * 100 >= data.total) {
+                break; 
+            }
+            page++;
+        }
     }
-  }
-  
-  console.log(`\n\n🎉 同步完成！总计导入 ${totalImported} 条新会话`);
-  process.exit(0);
+    console.log('\n✅ Udesk 同步完成！现在可以运行 node src/analyze.js 进行分析了。');
+    process.exit(0);
 }
 
-// 执行
-main().catch(error => {
-  console.error('💥 任务失败:', error);
-  process.exit(1);
-});
+main();

@@ -1,363 +1,190 @@
 -- =====================================================
--- VOC 数据库全量初始化脚本 (Consolidated Version)
--- 包含：基础功能、高级分析(聚类/专题/验证)、统一反馈模型
+-- VOC 数据库全量初始化脚本 (Final Version)
+-- 包含：用户权限、App配置、反馈池、提炼洞察、专题监控、事项追踪
 -- =====================================================
 
--- 1. 重置数据库
-DROP DATABASE IF EXISTS voc_db;
-CREATE DATABASE voc_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- 1. 创建并使用数据库 (如果不存在)
+CREATE DATABASE IF NOT EXISTS voc_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE voc_db;
 
 -- =====================================================
--- 第一部分：系统基础表 (用户/权限/配置)
+-- 第一部分：基础配置表
 -- =====================================================
 
--- 用户表
-CREATE TABLE users (
+-- 1. 用户表 (登录管理)
+CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(100) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     display_name VARCHAR(100),
-    role ENUM('admin', 'operator', 'viewer') DEFAULT 'operator',
+    role VARCHAR(20) DEFAULT 'operator', -- admin, operator, viewer
     is_active TINYINT(1) DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_login DATETIME NULL
-) ENGINE=InnoDB;
+    last_login DATETIME
+);
 
--- App配置表
-CREATE TABLE app_configs (
-    app_id VARCHAR(255) PRIMARY KEY,
-    app_name VARCHAR(255) NOT NULL,
+-- 2. 应用配置表 (App管理)
+-- 用于前端下拉框展示，以及关联数据归属
+CREATE TABLE IF NOT EXISTS app_configs (
+    app_id VARCHAR(100) PRIMARY KEY,
+    app_name VARCHAR(100) NOT NULL,
     country VARCHAR(10),
     is_active TINYINT(1) DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
+);
 
--- 邮件订阅配置表
-CREATE TABLE email_subscriptions (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    app_id VARCHAR(255) NOT NULL,
-    app_name VARCHAR(255),
-    email VARCHAR(255) NOT NULL,
-    recipient_name VARCHAR(100),
-    is_active TINYINT(1) DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_app_email (app_id, email)
-) ENGINE=InnoDB;
-
--- AI费用记录表
-CREATE TABLE ai_costs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    provider VARCHAR(50),
-    model VARCHAR(100),
-    operation_type VARCHAR(50),
-    input_tokens INT,
-    output_tokens INT,
-    total_cost DECIMAL(10, 6),
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_created_at (created_at),
-    INDEX idx_operation_type (operation_type)
-) ENGINE=InnoDB;
+-- 初始化 MexiCash 数据 (防止空表导致前端不显示)
+INSERT IGNORE INTO app_configs (app_id, app_name, country) VALUES 
+('com.mexicash.app', 'MexiCash', 'MX');
 
 -- =====================================================
--- 第二部分：核心反馈数据模型 (Unified Feedback Model)
--- 取代了原有的 conversations / raw_reviews 概念
+-- 第二部分：核心数据池 (底层数据)
 -- =====================================================
 
--- 1. 反馈主表 (存储元数据和AI分析结果)
-CREATE TABLE voc_feedbacks (
+-- 3. 原始反馈主表 (存储所有抓取/同步进来的数据)
+CREATE TABLE IF NOT EXISTS voc_feedbacks (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     
-    -- 核心标识
-    source VARCHAR(50) NOT NULL COMMENT '来源: google_play, udesk_chat, udesk_voice 等，可自由扩展',
-    external_id VARCHAR(255) NOT NULL COMMENT '外部ID (ReviewId / TicketId)',
-    source_url VARCHAR(500) DEFAULT NULL COMMENT '跳转链接(GP链接或工单后台链接)',
+    -- 来源标识
+    source VARCHAR(50),          -- 'google_play', 'udesk_chat', 'udesk_voice'
+    external_id VARCHAR(255),    -- 外部唯一ID (ReviewId / TicketId)
+    source_url VARCHAR(500),     -- 跳转链接
     
     -- App信息
-    app_id VARCHAR(100) NOT NULL,
+    app_id VARCHAR(100),
     app_name VARCHAR(100),
     country VARCHAR(10),
     version VARCHAR(50),
     
-    -- 用户信息 (已去敏感，仅保留ID/Name用于串联)
+    -- 用户信息
     user_name VARCHAR(255),
-    rating INT DEFAULT NULL COMMENT '评分(1-5，仅针对评论)',
+    rating INT,                  -- 1-5星
     
-    -- AI 分析结果 (分析脚本回填这里)
-    category VARCHAR(50) COMMENT 'AI分析分类',
-    risk_level VARCHAR(20) DEFAULT 'Low' COMMENT 'High, Medium, Low',
-    summary TEXT COMMENT 'AI摘要',
-    root_cause TEXT COMMENT 'AI根因推断',
-    action_advice TEXT COMMENT 'AI行动建议',
-    suggested_reply TEXT COMMENT 'AI建议回复',
-    sentiment_score DECIMAL(3,2) COMMENT '情感分数',
+    -- 内容 (基础)
+    content TEXT,                -- 原文
     
-    -- 状态流转
-    process_status VARCHAR(20) DEFAULT 'raw' COMMENT 'raw:待分析, analyzed:已分析, replied:已回复, ignored:忽略',
-    is_replied TINYINT(1) DEFAULT 0 COMMENT '是否已在源平台回复',
+    -- AI 基础分析 (清洗阶段写入)
+    translated_content TEXT,     -- 中文翻译
+    sentiment VARCHAR(20),       -- 【新增】Positive (好评) / Neutral (中评) / Negative (差评)
+    risk_level VARCHAR(20) DEFAULT 'Low', -- High / Medium / Low
+    category VARCHAR(50),        -- 基础分类 (资金/功能/催收/其他)
     
-    -- 业务状态 (人工处理状态)
-    status ENUM('pending', 'irrelevant', 'confirmed', 'reported', 'in_progress', 'resolved') DEFAULT 'pending',
-    assignee VARCHAR(100),
-    note TEXT,
+    -- 时间与状态
+    feedback_time DATETIME,      -- 反馈发生时间
+    process_status VARCHAR(20) DEFAULT 'raw', -- raw (待清洗) -> analyzed (已清洗)
     
-    -- 时间
-    feedback_time DATETIME NOT NULL COMMENT '反馈发生时间',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
-    UNIQUE KEY uk_source_external (source, external_id),
-    INDEX idx_app_time (app_id, feedback_time),
-    INDEX idx_status (process_status),
-    INDEX idx_biz_status (status),
-    INDEX idx_risk (risk_level)
-) ENGINE=InnoDB;
+    UNIQUE KEY uk_ext (source, external_id),
+    INDEX idx_time_app (feedback_time, app_id),
+    INDEX idx_process (process_status)
+);
 
--- 2. 对话详情表 (存储具体内容，支持多轮对话)
-CREATE TABLE voc_feedback_messages (
+-- 4. 对话详情表 (存储多轮对话或更详细的文本)
+CREATE TABLE IF NOT EXISTS voc_feedback_messages (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    feedback_id BIGINT NOT NULL,
-    
-    sequence_num INT NOT NULL DEFAULT 1 COMMENT '对话顺序',
-    role VARCHAR(20) NOT NULL COMMENT 'user, agent, system',
-    content_type VARCHAR(20) DEFAULT 'text', -- text, image, audio, file
-    
-    content LONGTEXT,            -- 原文
-    translated_content LONGTEXT, -- 中文翻译
-    file_url VARCHAR(500),       -- 如果是图片/音频，存储URL
-    
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    
-    FOREIGN KEY (feedback_id) REFERENCES voc_feedbacks(id) ON DELETE CASCADE,
-    INDEX idx_feedback (feedback_id)
-) ENGINE=InnoDB;
+    feedback_id BIGINT,
+    role VARCHAR(20),            -- 'user', 'agent'
+    content LONGTEXT,            -- 消息原文
+    translated_content LONGTEXT, -- 消息翻译
+    FOREIGN KEY (feedback_id) REFERENCES voc_feedbacks(id) ON DELETE CASCADE
+);
 
 -- =====================================================
--- 第三部分：高级分析功能 (聚类/专题/验证/报告)
+-- 第三部分：新业务表 (提炼/专题/事项)
 -- =====================================================
 
--- 1. 专题配置表 (Topic Configs)
-CREATE TABLE topic_configs (
+-- 5. 月度反馈提炼表 (Monthly Insights)
+-- 用于 "本月用户反馈提炼列表" 页面
+CREATE TABLE IF NOT EXISTS monthly_insights (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    description TEXT,
-    keywords JSON NOT NULL COMMENT '关键词数组',
-    
-    -- 作用域
-    scope ENUM('global', 'country', 'app') NOT NULL DEFAULT 'global',
-    country VARCHAR(10) DEFAULT NULL,
-    app_id VARCHAR(100) DEFAULT NULL,
-    
-    is_active TINYINT(1) DEFAULT 1,
-    start_date DATE DEFAULT NULL,
-    end_date DATE DEFAULT NULL,
-    
-    created_by INT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    
-    INDEX idx_scope (scope, country, app_id)
-) ENGINE=InnoDB;
-
--- 2. 专题匹配记录表 (Topic Matches)
-CREATE TABLE topic_matches (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    topic_id INT NOT NULL,
-    review_id BIGINT NOT NULL COMMENT '关联 voc_feedbacks.id', 
-    app_id VARCHAR(100) NOT NULL,
-    country VARCHAR(10) NOT NULL,
-    matched_keywords JSON,
-    matched_text TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    UNIQUE KEY uk_topic_review (topic_id, review_id),
-    INDEX idx_topic (topic_id),
-    FOREIGN KEY (topic_id) REFERENCES topic_configs(id) ON DELETE CASCADE,
-    FOREIGN KEY (review_id) REFERENCES voc_feedbacks(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-
--- 3. 专题分析结果表 (Topic Analysis)
-CREATE TABLE topic_analysis (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    topic_id INT NOT NULL,
-    analysis_date DATE NOT NULL,
-    period_start DATE NOT NULL,
-    period_end DATE NOT NULL,
-    
-    total_matches INT DEFAULT 0,
-    sentiment_positive INT DEFAULT 0,
-    sentiment_negative INT DEFAULT 0,
-    sentiment_neutral INT DEFAULT 0,
-    
-    ai_summary TEXT,
-    pain_points JSON,
-    recommendations JSON,
-    
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_topic_date (topic_id, analysis_date),
-    FOREIGN KEY (topic_id) REFERENCES topic_configs(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-
--- 4. 问题聚类表 (Issue Clusters)
-CREATE TABLE issue_clusters (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    app_id VARCHAR(100) NOT NULL,
-    category VARCHAR(50) NOT NULL,
-    
-    week_number INT NOT NULL,
-    year INT NOT NULL,
-    period_start DATE NOT NULL,
-    period_end DATE NOT NULL,
-    
-    cluster_title VARCHAR(200) NOT NULL,
-    cluster_rank INT NOT NULL,
-    review_count INT NOT NULL,
-    percentage DECIMAL(5,2),
-    
-    review_ids JSON COMMENT '关联 voc_feedbacks.id 的列表',
-    
-    root_cause_summary TEXT,
-    action_suggestion TEXT,
-    sample_reviews JSON,
-    
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    UNIQUE KEY uk_cluster (app_id, category, year, week_number, cluster_rank),
-    INDEX idx_app_week (app_id, year, week_number)
-) ENGINE=InnoDB;
-
--- 5. 闭环验证配置表 (Verification Configs)
-CREATE TABLE verification_configs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
+    batch_month VARCHAR(20) NOT NULL, -- 批次月份，如 '2025-01'
     app_id VARCHAR(100) NOT NULL,
     
-    issue_type ENUM('category', 'cluster', 'keyword') NOT NULL,
-    issue_value VARCHAR(200) NOT NULL,
+    -- 核心问题
+    problem_title VARCHAR(255) NOT NULL, -- 聚合后的问题标题
+    problem_count INT DEFAULT 0,         -- 问题数量 (GP+Udesk总和)
     
-    baseline_start DATE NOT NULL,
-    baseline_end DATE NOT NULL,
+    -- 代表性原声 (AI 提取)
+    sample_content TEXT,                 -- 原文
+    sample_translated TEXT,              -- 中文翻译
+    sample_source VARCHAR(50),           -- 来源
+    sample_link VARCHAR(500),            -- 跳转链接
     
-    verify_start DATE NOT NULL,
-    verify_end DATE DEFAULT NULL,
+    -- AI 分析与分派
+    ai_suggestion TEXT,                  -- 优化建议
+    departments JSON,                    -- 关注部门 ['UI', '产品']
+    owners JSON,                         -- 关注人 ['蔡光磊', '王玲']
     
-    optimization_desc TEXT,
-    expected_reduction DECIMAL(5,2),
+    -- 业务操作状态
+    is_marked TINYINT(1) DEFAULT 0,      -- 是否标记/收藏
+    task_id INT DEFAULT NULL,            -- 关联的事项ID (如果不为空，说明已转化)
     
-    status ENUM('monitoring', 'resolved', 'worsened', 'no_change') DEFAULT 'monitoring',
-    
-    created_by INT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
-
--- 6. 闭环验证结果表 (Verification Results)
-CREATE TABLE verification_results (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    config_id INT NOT NULL,
-    verify_date DATE NOT NULL,
-    
-    baseline_count INT NOT NULL,
-    baseline_total INT NOT NULL,
-    baseline_ratio DECIMAL(8,4),
-    
-    verify_count INT NOT NULL,
-    verify_total INT NOT NULL,
-    verify_ratio DECIMAL(8,4),
-    
-    count_change INT,
-    ratio_change DECIMAL(8,4),
-    change_percent DECIMAL(8,2),
-    
-    conclusion ENUM('resolved', 'improved', 'no_change', 'worsened') NOT NULL,
-    
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (config_id) REFERENCES verification_configs(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-
--- 7. 报告存档表 (整合了高级字段)
-CREATE TABLE reports (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    app_id VARCHAR(255) NOT NULL,
-    app_name VARCHAR(255),
-    report_type VARCHAR(50) DEFAULT 'weekly',
-    week_number INT,
-    year INT,
-    title VARCHAR(500),
-    content LONGTEXT NOT NULL,
-    
-    -- 统计数据
-    summary_stats JSON,
-    compared_with_last JSON,
-    total_issues INT DEFAULT 0,
-    new_issues INT DEFAULT 0,
-    resolved_issues INT DEFAULT 0,
-    pending_issues INT DEFAULT 0,
-    
-    -- 高级分析摘要
-    cluster_summary JSON,
-    topic_summary JSON,
-    verification_summary JSON,
-    action_items JSON,
-    
-    generated_by INT,
-    generated_by_name VARCHAR(100),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    
-    INDEX idx_app_id (app_id),
-    INDEX idx_year_week (year, week_number)
-) ENGINE=InnoDB;
+    INDEX idx_month_app (batch_month, app_id)
+);
 
--- 8. 状态变更日志
-CREATE TABLE status_logs (
+-- 6. 专题配置表 (Topic Configs)
+-- 用于 "专题管理"
+CREATE TABLE IF NOT EXISTS topic_configs (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    review_id BIGINT NOT NULL COMMENT '关联 voc_feedbacks.id',
-    old_status VARCHAR(50),
-    new_status VARCHAR(50) NOT NULL,
-    user_id INT,
-    user_name VARCHAR(100),
-    note TEXT,
+    name VARCHAR(100) NOT NULL,          -- 专题名称 (如"暴力催收")
+    keywords JSON NOT NULL,              -- 关键词列表 ["杀全家", "威胁"]
+    is_active TINYINT DEFAULT 1,         -- 开关
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 7. 专题趋势表 (Topic Trends)
+-- 用于 "本月关注专题列表" 页面
+CREATE TABLE IF NOT EXISTS topic_trends (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    topic_config_id INT NOT NULL,        -- 关联配置ID
+    topic_name VARCHAR(100),             -- 冗余名称，方便查询
+    batch_month VARCHAR(20) NOT NULL,    -- 月份 '2025-01'
+    app_id VARCHAR(100),
+    
+    issue_count INT DEFAULT 0,           -- 命中数量
+    
+    -- 代表性原声
+    sample_content TEXT,
+    sample_translated TEXT,
+    sample_source VARCHAR(50),
+    sample_link VARCHAR(500),
+    
+    -- AI 分析
+    ai_suggestion TEXT,
+    departments JSON,
+    owners JSON,
+    
+    -- 状态
+    is_marked TINYINT(1) DEFAULT 0,
+    task_id INT DEFAULT NULL,
+    
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_review_id (review_id)
-) ENGINE=InnoDB;
+    FOREIGN KEY (topic_config_id) REFERENCES topic_configs(id) ON DELETE CASCADE
+);
 
--- 9. 定时任务执行记录表
-CREATE TABLE scheduled_task_logs (
+-- 8. 事项追踪表 (Action Tasks)
+-- 用于 "事项跟进" 页面，存储转化后的任务
+CREATE TABLE IF NOT EXISTS action_tasks (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    task_type ENUM('cluster', 'topic_scan', 'verification', 'weekly_report') NOT NULL,
-    app_id VARCHAR(100) DEFAULT NULL,
-    status ENUM('running', 'success', 'failed') NOT NULL,
-    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    finished_at TIMESTAMP NULL,
-    items_processed INT DEFAULT 0,
-    error_message TEXT,
-    result_summary JSON
-) ENGINE=InnoDB;
-
-CREATE TABLE review_groups (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    app_id VARCHAR(100) NOT NULL,
-    group_title VARCHAR(200) NOT NULL COMMENT '问题标题',
-    group_rank INT NOT NULL COMMENT '优先级排名',
-    review_count INT NOT NULL COMMENT '涉及评论数',
-    percentage DECIMAL(5,2) COMMENT '占比',
     
-    -- 关联的评论ID
-    review_ids JSON NOT NULL COMMENT '数据库ID列表',
+    -- 来源追踪 (反向关联)
+    source_type VARCHAR(20),      -- 'insight' (来自提炼) 或 'topic' (来自专题)
+    source_id INT,                -- 对应表的主键ID
+    original_problem VARCHAR(255),-- 原始问题标题/专题名
     
-    -- AI分析结果
-    root_cause_summary TEXT,
-    action_suggestion TEXT,
-    sample_reviews JSON COMMENT '代表性评论',
+    -- 事项详情 (弹窗填写的字段)
+    title VARCHAR(255) NOT NULL,  -- 事项标题
+    description TEXT,             -- 事项描述
+    business_value VARCHAR(255),  -- 业务提升
     
-    -- 自动归类(可选，保留灵活性)
-    auto_category VARCHAR(50) COMMENT 'AI自动分类',
+    start_date DATE,              -- 开始时间
+    end_date DATE,                -- 完成时间
+    owner_name VARCHAR(100),      -- 跟进人
     
-    -- 状态管理
-    status ENUM('pending', 'confirmed', 'in_progress', 'resolved') DEFAULT 'pending',
-    assigned_to VARCHAR(100),
+    -- 任务状态
+    status VARCHAR(50) DEFAULT 'pending', -- pending (进行中), done (已完成)
     
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    
-    INDEX idx_app_rank (app_id, group_rank)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

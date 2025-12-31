@@ -5,15 +5,15 @@ import pool from './db/index.js';
 // 配置：每个应用 × 多个语言视角
 // ==========================================
 const APP_CONFIGS = [
-    // 巴基斯坦
-    {
-        appId: 'com.creditcat.tech.app',
-        appName: 'SmartQarza',
-        views: [
-            { country: 'pk', lang: 'ur', label: 'PK_ur' },
-            { country: 'pk', lang: 'en', label: 'PK_en' },
-        ]
-    },
+    // // 巴基斯坦
+    // {
+    //     appId: 'com.creditcat.tech.app',
+    //     appName: 'SmartQarza',
+    //     views: [
+    //         { country: 'pk', lang: 'ur', label: 'PK_ur' },
+    //         { country: 'pk', lang: 'en', label: 'PK_en' },
+    //     ]
+    // },
     // 墨西哥
     {
         appId: 'com.mexicash.app',
@@ -24,41 +24,41 @@ const APP_CONFIGS = [
         ]
     },
     // 菲律宾
-    {
-        appId: 'com.mocamoca',
-        appName: 'MocaMoca',
-        views: [
-            { country: 'ph', lang: 'en', label: 'PH_en' },
-            { country: 'ph', lang: 'tl', label: 'PH_tl' },
-        ]
-    },
-    // 印尼
-    {
-        appId: 'com.pinjamwinwin',
-        appName: 'Pinjamin',
-        views: [
-            { country: 'id', lang: 'id', label: 'ID_id' },
-            { country: 'id', lang: 'en', label: 'ID_en' },
-        ]
-    },
-    // 泰国 - EASY สินเชื่อ
-    {
-        appId: 'com.thai.credit.finance.reliable.loan.android',
-        appName: 'EASY สินเชื่อ',
-        views: [
-            { country: 'th', lang: 'th', label: 'TH_th' },
-            { country: 'th', lang: 'en', label: 'TH_en' },
-        ]
-    },
-    // 泰国 - สินเชื่ออีซี่
-    {
-        appId: 'com.reliablecredit.effectivecash.effectiveloan.android',
-        appName: 'สินเชื่ออีซี่',
-        views: [
-            { country: 'th', lang: 'th', label: 'TH_th' },
-            { country: 'th', lang: 'en', label: 'TH_en' },
-        ]
-    },
+    // {
+    //     appId: 'com.mocamoca',
+    //     appName: 'MocaMoca',
+    //     views: [
+    //         { country: 'ph', lang: 'en', label: 'PH_en' },
+    //         { country: 'ph', lang: 'tl', label: 'PH_tl' },
+    //     ]
+    // },
+    // // 印尼
+    // {
+    //     appId: 'com.pinjamwinwin',
+    //     appName: 'Pinjamin',
+    //     views: [
+    //         { country: 'id', lang: 'id', label: 'ID_id' },
+    //         { country: 'id', lang: 'en', label: 'ID_en' },
+    //     ]
+    // },
+    // // 泰国 - EASY สินเชื่อ
+    // {
+    //     appId: 'com.thai.credit.finance.reliable.loan.android',
+    //     appName: 'EASY สินเชื่อ',
+    //     views: [
+    //         { country: 'th', lang: 'th', label: 'TH_th' },
+    //         { country: 'th', lang: 'en', label: 'TH_en' },
+    //     ]
+    // },
+    // // 泰国 - สินเชื่ออีซี่
+    // {
+    //     appId: 'com.reliablecredit.effectivecash.effectiveloan.android',
+    //     appName: 'สินเชื่ออีซี่',
+    //     views: [
+    //         { country: 'th', lang: 'th', label: 'TH_th' },
+    //         { country: 'th', lang: 'en', label: 'TH_en' },
+    //     ]
+    // },
 ];
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));

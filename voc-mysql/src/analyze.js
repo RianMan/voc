@@ -1,204 +1,116 @@
+import pool from './db/connection.js';
 import OpenAI from 'openai';
-import dotenv from 'dotenv';
-import { pool } from './db/index.js';
-import { recordAICost } from './db/index.js';
 
-dotenv.config();
-
-const apiKey = process.env.DEEPSEEK_API_KEY;
-const baseURL = 'https://api.deepseek.com';
-
-const openai = new OpenAI({ apiKey, baseURL, timeout: 60000 });
-const MODEL_NAME = 'deepseek-chat';
-
-const SYSTEM_PROMPT = `
-你是一位资深的金融App产品经理和用户体验专家。请分析用户的反馈内容。
-
-【输出JSON格式要求】:
-{
-    "category": "Tech_Bug" | "Compliance_Risk" | "Product_Issue" | "Positive" | "User_Error" | "Other",
-    "risk_level": "High" | "Medium" | "Low",
-    "summary": "中文一句话摘要",
-    "root_cause": "中文深度归因",
-    "action_advice": "中文行动建议",
-    "suggested_reply": "高情商回复(当地语言)",
-    "sentiment_score": 0.5 (范围 -1到1, 0为中性),
-    "translated_text": "中文翻译(如果原文已是中文则留空)"
-}
-`;
+const client = new OpenAI({
+  apiKey: process.env.DEEPSEEK_API_KEY, 
+  baseURL: 'https://api.deepseek.com',
+  timeout: 60000 // 60秒超时设置
+});
 
 // 辅助工具：休眠函数
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// 辅助工具：带超时的 Promise
-const timeoutPromise = (ms, promise) => {
-    return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-            reject(new Error(`请求超时 (${ms/1000}秒)`));
-        }, ms);
-        promise
-            .then(value => {
-                clearTimeout(timer);
-                resolve(value);
-            })
-            .catch(reason => {
-                clearTimeout(timer);
-                reject(reason);
-            });
-    });
-};
+async function analyzeLoop() {
+  console.log('🚀 开始全自动分析任务 (翻译 + 情感 + 风险)...');
 
-/**
- * 判断文本是否为中文
- */
-function isChinese(text, country) {
-    // 1. 如果国家是中国，直接返回 true
-    if (country === 'CN') return true;
-    
-    // 2. 检测文本中是否含有中文字符
-    const chineseRegex = /[\u4e00-\u9fa5]/;
-    return chineseRegex.test(text);
-}
-
-async function analyzeFeedbacks() {
-    const conn = await pool.getConnection();
-    
+  while (true) {
     try {
-        // 1. 先查询待分析总数
-        const [countResult] = await conn.execute(
-            `SELECT COUNT(*) as total 
-             FROM voc_feedbacks f
-             JOIN voc_feedback_messages m ON f.id = m.feedback_id
-             WHERE f.process_status = 'raw' 
-               AND m.role = 'user' 
-               AND m.sequence_num = 1`
-        );
-        const totalRemaining = countResult[0].total;
-        
-        if (totalRemaining === 0) {
-            console.log("🎉 所有数据已分析完毕，暂无新数据。");
-            return;
-        }
-        
-        // 2. 获取待分析数据 
-        const BATCH_SIZE = 5;
-        const [rows] = await conn.execute(
-            `SELECT f.id, f.app_name, f.country, m.content 
-             FROM voc_feedbacks f
-             JOIN voc_feedback_messages m ON f.id = m.feedback_id
-             WHERE f.process_status = 'raw' 
-               AND m.role = 'user' 
-               AND m.sequence_num = 1
-             ORDER BY f.id ASC 
-             LIMIT ?`,
-            [BATCH_SIZE.toString()]
-        );
+      // 1. 查询剩余数量
+      const [countResult] = await pool.execute(`
+        SELECT COUNT(*) as total FROM voc_feedbacks WHERE process_status = 'raw'
+      `);
+      const totalRemaining = countResult[0].total;
 
-        console.log(`🔎 本批次待分析: ${rows.length} 条 | 剩余总数: ${totalRemaining} 条 (Start ID: ${rows[0].id})`);
+      if (totalRemaining === 0) {
+        console.log('🎉 所有数据分析完毕！暂无新数据。');
+        break; // 退出循环
+      }
 
-        for (const item of rows) {
-            const lang = isChinese(item.content, item.country) ? 'CN' : 'Other';
-            process.stdout.write(`   🔄 [ID:${item.id}] ${item.app_name} (${item.country}, ${lang === 'CN' ? '中文' : '外文'})... `);
-            
-            try {
-                // 设置 45秒 逻辑超时
-                const analysis = await timeoutPromise(45000, callAI(item.content, item.country));
-                
-                // 更新主表
-                await conn.execute(
-                    `UPDATE voc_feedbacks SET 
-                        category = ?, risk_level = ?, summary = ?, 
-                        root_cause = ?, action_advice = ?, suggested_reply = ?, 
-                        sentiment_score = ?, process_status = 'analyzed'
-                     WHERE id = ?`,
-                    [
-                        analysis.category || 'Other',
-                        analysis.risk_level || 'Low',
-                        analysis.summary || '无摘要',
-                        analysis.root_cause || '',
-                        analysis.action_advice || '',
-                        analysis.suggested_reply || '',
-                        analysis.sentiment_score || 0,
-                        item.id
-                    ]
-                );
+      // 2. 获取本批次数据 (一次50条)
+      const [reviews] = await pool.execute(`
+        SELECT f.id, f.content, f.rating, f.app_name, f.country 
+        FROM voc_feedbacks f 
+        WHERE process_status = 'raw' 
+        LIMIT 50
+      `);
 
-                // 只有当翻译不为空时才更新
-                if (analysis.translated_text && analysis.translated_text.trim()) {
-                    await conn.execute(
-                        `UPDATE voc_feedback_messages SET translated_content = ? 
-                         WHERE feedback_id = ? AND role = 'user' AND sequence_num = 1`,
-                        [analysis.translated_text, item.id]
-                    );
-                }
-                
-                console.log("✅");
+      console.log(`\n📊 剩余待处理: ${totalRemaining} 条 | 本批次: ${reviews.length} 条`);
 
-            } catch (err) {
-                console.log(`❌ 错误: ${err.message}`);
-                await sleep(60000);
+      // 3. 并行/串行处理本批次
+      for (const [index, review] of reviews.entries()) {
+        const currentLeft = totalRemaining - index - 1;
+        process.stdout.write(`   [${index + 1}/${reviews.length}] 分析 ID:${review.id}... `);
+
+        try {
+          // AI 分析
+          const prompt = `
+            你是一名多语言金融客服专家。
+            App: ${review.app_name} (${review.country})
+            内容: ${review.content}
+            评分: ${review.rating || '无'}星
+
+            请输出纯JSON:
+            {
+              "translated": "中文翻译",
+              "sentiment": "Positive/Neutral/Negative",
+              "risk": "High/Medium/Low", 
+              "category": "资金问题/功能体验/催收服务/注册登录/其他"
             }
+          `;
+
+          const completion = await client.chat.completions.create({
+            model: 'deepseek-chat',
+            messages: [{ role: 'user', content: prompt }],
+            response_format: { type: 'json_object' }
+          });
+
+          const result = JSON.parse(completion.choices[0].message.content);
+
+          // 更新数据库
+          await pool.execute(`
+            UPDATE voc_feedbacks SET 
+              translated_content = ?, 
+              sentiment = ?, 
+              risk_level = ?, 
+              category = ?, 
+              process_status = 'analyzed' 
+            WHERE id = ?
+          `, [
+            result.translated, 
+            result.sentiment, 
+            result.risk, 
+            result.category, 
+            review.id
+          ]);
+
+          // 同步消息表
+          await pool.execute(`
+            UPDATE voc_feedback_messages SET translated_content = ? 
+            WHERE feedback_id = ? AND role = 'user'
+          `, [result.translated, review.id]);
+
+          console.log(`✅`); // 成功
+
+        } catch (innerErr) {
+          console.log(`❌ (跳过)`);
+          console.error(`      错误: ${innerErr.message}`);
+          // 遇到单条错误不退出，继续下一条
         }
-        
-        conn.release();
-        
-        // 正常处理完一批，继续下一批
-        await analyzeFeedbacks(); 
+      }
+
+      // 批次之间稍微休息一下，防止数据库压力过大
+      await sleep(1000);
 
     } catch (fatalError) {
-        console.error("💥 发生严重错误:", fatalError);
-        console.log("⏳ 严重错误冷却：暂停 2 分钟...");
-        await sleep(120000);
-        await analyzeFeedbacks();
-    } finally {
-        conn.release();
+      console.error('\n💥 发生连接错误或严重异常:', fatalError.message);
+      console.log('⏳ 5秒后自动重试...');
+      await sleep(5000);
+      // while循环会继续，实现自动重试
     }
+  }
+
+  process.exit(0);
 }
 
-async function callAI(text, country) {
-    if (!text || text.length < 2) return {};
-
-    const isChineseText = isChinese(text, country);
-
-    const completion = await openai.chat.completions.create({
-        model: MODEL_NAME,
-        messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            { 
-                role: "user", 
-                content: isChineseText 
-                    ? `用户评论内容(中文):\n${text}\n\n注意: 原文已是中文，translated_text 字段留空即可。`
-                    : `用户评论内容:\n${text}`
-            }
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.2
-    });
-
-    if (completion.usage) {
-        await recordAICost('deepseek', MODEL_NAME, 'analysis', completion.usage);
-    }
-
-    try {
-        const result = JSON.parse(completion.choices[0].message.content);
-        
-        // 如果是中文且 AI 错误地返回了翻译，清空它
-        if (isChineseText && result.translated_text) {
-            result.translated_text = '';
-        }
-        
-        return result;
-    } catch (e) {
-        console.error("AI返回JSON解析失败");
-        return {};
-    }
-}
-
-async function main() {
-    console.log("=== 开始 AI 分析任务 (自动熔断重试版) ===");
-    await analyzeFeedbacks();
-    console.log("\n✨ 全部任务执行完毕！");
-    process.exit();
-}
-
-main();
+// 启动主循环
+analyzeLoop();
