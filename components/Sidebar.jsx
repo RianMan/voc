@@ -2,7 +2,7 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  LayoutDashboard, FileText, Target, CheckSquare, Settings, LogOut 
+  LayoutDashboard, FileText, Target, CheckSquare, Database, Shield, LogOut 
 } from 'lucide-react';
 
 export const Sidebar = ({ currentView, setCurrentView }) => {
@@ -13,8 +13,16 @@ export const Sidebar = ({ currentView, setCurrentView }) => {
     { id: 'monthly', label: '反馈提炼', icon: FileText },
     { id: 'topics', label: '专题关注', icon: Target },
     { id: 'tasks', label: '事项跟进', icon: CheckSquare },
-    { id: 'settings', label: '设置', icon: Settings },
+   
+    // { id: 'settings', label: '设置', icon: Settings },
   ];
+
+  // 2. 只有管理员才显示用户管理入口
+  if (user?.role === 'admin') {
+    menuItems.push({ id: 'users', label: '用户管理', icon: Shield });
+    menuItems.push({ id: 'system', label: '系统维护', icon: Database });
+    menuItems.push({ id: 'app', label: 'APP管理', icon: CheckSquare });
+  }
 
   return (
     <div className="w-64 bg-slate-900 text-white flex flex-col h-screen fixed left-0 top-0 z-10">

@@ -6,11 +6,13 @@ import {
   fetchTopicTrends, generateTopicTrends, createTask,
   fetchTopicConfigs, createTopicConfig, deleteTopicConfig
 } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 
 const { TextArea } = Input;
 const { Option } = Select;
 
 export const MonthlyTopicList = () => {
+    const { user } = useAuth();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -187,15 +189,17 @@ export const MonthlyTopicList = () => {
             onChange={e => setMonth(e.target.value)} 
             className="border rounded-lg px-3 py-2 text-sm"
           />
-          <Button 
-            type="primary" 
-            icon={<Sparkles size={16} />} 
-            onClick={handleGenerate} 
-            loading={generating}
-            className="bg-purple-600 hover:bg-purple-700"
-          >
-            AI 扫描分析
-          </Button>
+          {user?.role === 'admin' && (
+            <Button 
+              type="primary" 
+              icon={<Sparkles size={16} />} 
+              onClick={handleGenerate} 
+              loading={generating}
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              AI 扫描分析
+            </Button>
+          )}
         </div>
       </div>
 

@@ -26,7 +26,7 @@ export async function generateMonthlyInsights(appId, monthStr) {
   // ---------------- Phase 1: 分批提取 (Map) ----------------
   while (hasMore) {
     // 1. 分页获取数据
-    const [reviews] = await pool.execute(`
+    const [reviews] = await pool.query(`
       SELECT id, translated_content, content
       FROM voc_feedbacks
       WHERE app_id = ? 
@@ -207,10 +207,11 @@ export async function generateTopicTrends(appId, monthStr) {
   // ---------------- Phase 1: 循环分批处理 ----------------
   while (hasMore) {
     // 分页查数据
-    const [reviews] = await pool.execute(`
+    const [reviews] = await pool.query(`
       SELECT id, source, source_url, translated_content, content
       FROM voc_feedbacks
       WHERE app_id = ? 
+        AND process_status = 'analyzed'
         AND DATE_FORMAT(feedback_time, '%Y-%m') = ?
       ORDER BY feedback_time DESC
       LIMIT ? OFFSET ?

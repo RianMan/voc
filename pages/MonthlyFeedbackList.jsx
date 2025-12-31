@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Table, Tag, Button, Modal, Form, Input, DatePicker, message, Select } from 'antd';
 import { Sparkles } from 'lucide-react';
 import { fetchMonthlyInsights, generateMonthlyInsights, createTask } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 
 const { TextArea } = Input;
 
 export const MonthlyFeedbackList = () => {
+  const { user } = useAuth();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -79,9 +81,6 @@ export const MonthlyFeedbackList = () => {
       render: (_, r) => (
         <div className="text-xs text-slate-600 bg-slate-50 p-2 rounded border border-slate-200">
           <p className="mb-1">{r.sample_translated}</p>
-          <div className="text-slate-400 mt-1">
-            来源: {r.sample_source === 'google_play' ? 'Google Play' : 'Udesk'}
-          </div>
         </div>
       )
     },
@@ -135,15 +134,17 @@ export const MonthlyFeedbackList = () => {
             onChange={e => setMonth(e.target.value)} 
             className="border rounded-lg px-3 py-2 text-sm"
           />
-          <Button 
-            type="primary" 
-            icon={<Sparkles size={16} />} 
-            onClick={handleGenerate} 
-            loading={generating}
-            className="bg-purple-600 hover:bg-purple-700"
-          >
-            AI 重新分析
-          </Button>
+          {user?.role === 'admin' && (
+            <Button 
+              type="primary" 
+              icon={<Sparkles size={16} />} 
+              onClick={handleGenerate} 
+              loading={generating}
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              AI 重新分析
+            </Button>
+          )}
         </div>
       </div>
 

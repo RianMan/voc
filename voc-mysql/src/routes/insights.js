@@ -2,6 +2,7 @@ import { Router } from 'express';
 import pool from '../db/connection.js';
 // ✅ 关键修复：必须引入 generateTopicTrends
 import { generateMonthlyInsights, generateTopicTrends } from '../services/InsightGenerator.js';
+import { authMiddleware, requireRole } from '../middleware/auth.js'
 
 const router = Router();
 
@@ -25,7 +26,7 @@ router.get('/monthly', async (req, res) => {
 
 // POST /api/insights/generate
 // 触发 AI 提炼 (反馈)
-router.post('/generate', async (req, res) => {
+router.post('/generate', authMiddleware, requireRole('admin'), async (req, res) => {
   const { appId, month } = req.body;
   try {
     const result = await generateMonthlyInsights(appId, month);
@@ -55,7 +56,7 @@ router.get('/topics', async (req, res) => {
 
 // POST /api/insights/topics/generate
 // ✅ 关键修复：触发专题分析的接口
-router.post('/topics/generate', async (req, res) => {
+router.post('/topics/generate', authMiddleware, requireRole('admin'), async (req, res) => {
   const { appId, month } = req.body;
   try {
     const result = await generateTopicTrends(appId, month);

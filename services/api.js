@@ -31,8 +31,6 @@ async function request(endpoint, options = {}) {
   }
 }
 
-// === 基础配置 ===
-export const fetchApps = () => request('/apps');
 
 // === Dashboard 概览 ===
 export const fetchTrendAnalysis = ({ appId, period, sentiment, limit }) => {
@@ -97,3 +95,51 @@ export const fetchSentimentStats = ({ appId, period, limit }) =>
 export const fetchTopicConfigs = () => request('/topics');
 export const createTopicConfig = (data) => request('/topics', { method: 'POST', body: JSON.stringify(data) });
 export const deleteTopicConfig = (id) => request(`/topics/${id}`, { method: 'DELETE' });
+
+// === 5. 用户管理 (User Management) ===
+export const fetchUsers = () => request('/users');
+
+export const createUser = (data) => 
+  request('/users', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  });
+
+export const updateUser = (id, data) => 
+  request(`/users/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  });
+
+export const deleteUser = (id) => 
+  request(`/users/${id}`, {
+    method: 'DELETE'
+});
+
+// === 6. 系统维护 (Admin System) ===
+export const triggerAnalyze = (targetAppId) => 
+  request('/admin/trigger/analyze', { 
+    method: 'POST',
+    body: JSON.stringify({ targetAppId }) 
+  });
+
+export const triggerFetchGP = (days = 7, targetAppId) => 
+  request('/admin/trigger/fetch-gp', { 
+    method: 'POST', 
+    body: JSON.stringify({ days, targetAppId }) 
+  });
+
+export const triggerFetchUdesk = (days = 7, targetAppId) => 
+  request('/admin/trigger/fetch-udesk', { 
+    method: 'POST', 
+    body: JSON.stringify({ days, targetAppId }) 
+  });
+
+  // === 7. 应用管理 (App Manager) ===
+export const fetchApps = () => request('/apps'); // 复用
+
+export const createApp = (data) => 
+  request('/apps', { method: 'POST', body: JSON.stringify(data) });
+
+export const deleteApp = (id) => 
+  request(`/apps/${id}`, { method: 'DELETE' });

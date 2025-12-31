@@ -4,6 +4,8 @@ import vocRoutes from './voc.js';       // 包含概览、趋势、统计
 import insightsRoutes from './insights.js'; // 新业务：反馈提炼
 import tasksRoutes from './tasks.js';       // 新业务：事项跟进
 import topicsRoutes from './topics.js';     // 新业务：专题配置
+import adminRoutes from './admin.js';
+import apps from './apps.js';
 
 const router = Router();
 
@@ -22,5 +24,10 @@ router.use('/tasks', tasksRoutes);
 
 // 5. 专题管理路由
 router.use('/topics', topicsRoutes);
+
+router.use('/admin', adminRoutes);
+
+router.use('/apps', apps);
+
 
 export default router;

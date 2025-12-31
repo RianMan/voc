@@ -1,7 +1,7 @@
 // 文件：pages/Dashboard.jsx
 import React, { useState, useEffect } from 'react';
 import { 
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,Brush
 } from 'recharts';
 import { fetchTrendAnalysis } from '../services/api';
 import { Loader2, TrendingUp, BarChart3, PieChart as PieIcon } from 'lucide-react';
@@ -29,7 +29,7 @@ export const Dashboard = () => {
   const loadAnalysisData = async () => {
     setLoading(true);
     // 动态计算 limit
-    const limit = period === 'day' ? 14 : (period === 'month' ? 12 : 8);
+    const limit = period === 'day' ? 90 : (period === 'month' ? 24 : 12);
     
     try {
       // ✅ 只需要调用这一个接口，数据就全有了
@@ -122,6 +122,17 @@ export const Dashboard = () => {
                     formatter={(value) => [`${value}%`]}
                   />
                   <Legend wrapperStyle={{ paddingTop: '20px' }} />
+
+                  {(period === 'day' || chartData.length > 20) && (
+                    <Brush 
+                        dataKey="date_key" 
+                        height={30} 
+                        stroke="#8884d8"
+                        tickFormatter={(str) => str.slice(5)} // 只显示 MM-DD，省空间
+                        startIndex={chartData.length - 15}    // ✅ 默认显示最近 15 天，剩下的在左边隐藏，需要拖动
+                        endIndex={chartData.length - 1}
+                    />
+                    )}
                   
                   {/* 好评率 - 绿色 */}
                   <Line 
